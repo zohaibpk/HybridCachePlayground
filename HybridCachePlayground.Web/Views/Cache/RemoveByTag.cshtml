@@ -1,0 +1,53 @@
+@model HybridCachePlayground.Web.Models.CacheRemoveByTagRequest
+@{
+    ViewData["Title"] = "Remove by Tag";
+}
+
+<h2 class="mb-4">Remove by Tag</h2>
+<p class="text-muted">
+    Evicts all entries sharing a tag using
+    <code>HybridCache.RemoveByTagAsync(tag)</code> — the key feature of tag-based invalidation.
+</p>
+
+<div class="row">
+    <div class="col-md-7">
+        <form asp-action="RemoveByTag" method="post">
+            @Html.AntiForgeryToken()
+            <div class="mb-3">
+                <label asp-for="Tag" class="form-label fw-semibold">Tag</label>
+                <input asp-for="Tag" class="form-control" placeholder="e.g. users" />
+                <span asp-validation-for="Tag" class="text-danger small"></span>
+                <div class="form-text">
+                    All entries that were stored with this tag will be evicted
+                    from both L1 and L2 simultaneously.
+                </div>
+            </div>
+            <button type="submit" class="btn btn-danger">Evict by Tag</button>
+            <a asp-controller="Home" asp-action="Index" class="btn btn-link">Back to Dashboard</a>
+        </form>
+    </div>
+
+    <div class="col-md-5">
+        <div class="card border-secondary">
+            <div class="card-header bg-secondary text-white small">API used</div>
+            <div class="card-body">
+                <pre class="small mb-0"><code>await hybridCache.RemoveByTagAsync(tag);</code></pre>
+            </div>
+        </div>
+        <div class="card border-info mt-3">
+            <div class="card-header bg-info text-white small">Tag invalidation pattern</div>
+            <div class="card-body small">
+                <p>Tags are great for group invalidation:</p>
+                <ul class="mb-0">
+                    <li>Tag <code>tenant-5</code> → evict all data for tenant 5</li>
+                    <li>Tag <code>users</code> → evict all user-related entries</li>
+                    <li>Tag <code>catalog</code> → evict after a product update</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    @{await Html.RenderPartialAsync("_ValidationScriptsPartial");}
+}

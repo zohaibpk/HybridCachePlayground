@@ -1,0 +1,46 @@
+@model HybridCachePlayground.Web.Models.CacheRemoveRequest
+@{
+    ViewData["Title"] = "Remove by Key";
+}
+
+<h2 class="mb-4">Remove by Key</h2>
+<p class="text-muted">
+    Evicts a single entry from both L1 and L2 using
+    <code>HybridCache.RemoveAsync(key)</code>.
+</p>
+
+<div class="row">
+    <div class="col-md-7">
+        <form asp-action="Remove" method="post">
+            @Html.AntiForgeryToken()
+            <div class="mb-3">
+                <label asp-for="Key" class="form-label fw-semibold">Cache Key</label>
+                <input asp-for="Key" class="form-control" placeholder="e.g. user:42" />
+                <span asp-validation-for="Key" class="text-danger small"></span>
+            </div>
+            <button type="submit" class="btn btn-danger">Remove Entry</button>
+            <a asp-controller="Home" asp-action="Index" class="btn btn-link">Back to Dashboard</a>
+        </form>
+    </div>
+
+    <div class="col-md-5">
+        <div class="card border-secondary">
+            <div class="card-header bg-secondary text-white small">API used</div>
+            <div class="card-body">
+                <pre class="small mb-0"><code>await hybridCache.RemoveAsync(key);</code></pre>
+            </div>
+        </div>
+        <div class="card border-warning mt-3">
+            <div class="card-header bg-warning small">Note</div>
+            <div class="card-body small">
+                <code>RemoveAsync</code> evicts from <strong>both</strong> L1 (in-process)
+                and L2 (distributed). On multi-server setups, all nodes are invalidated
+                when using a distributed L2 backend.
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    @{await Html.RenderPartialAsync("_ValidationScriptsPartial");}
+}
