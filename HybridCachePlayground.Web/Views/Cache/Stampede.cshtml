@@ -48,13 +48,14 @@
             <div class="card-header bg-info text-white small">How stampede protection works</div>
             <div class="card-body small">
                 <p>
-                    With a plain <code>IMemoryCache</code>, if 50 requests arrive for the same uncached key,
-                    all 50 see a miss and call the factory — <strong>50 database hits</strong>.
+                    Without stampede protection, if 50 requests arrive for the same uncached key
+                    simultaneously, all 50 see a miss and invoke the factory —
+                    <strong>50 redundant backend calls</strong>.
                 </p>
                 <p class="mb-0">
                     <code>HybridCache</code> uses an internal lock per key. The first caller gets the lock
                     and runs the factory; all other callers <em>await the same result</em>. Factory runs
-                    <strong>exactly once</strong>, regardless of concurrency.
+                    <strong>exactly once</strong>, regardless of the backend or concurrency level.
                 </p>
             </div>
         </div>

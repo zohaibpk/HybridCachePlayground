@@ -1,5 +1,7 @@
 # HybridCache Playground
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 An interactive ASP.NET 8 MVC web application for exploring and testing **Microsoft HybridCache** (`Microsoft.Extensions.Caching.Hybrid`). Set, retrieve, and invalidate cache entries through a live browser UI — no Postman or test code required.
 
 The project defaults to **IMemoryCache (L1) + DistributedMemoryCache (L2)** so it runs out of the box with zero infrastructure. The L2 backend is designed to be swapped for NCache, SQL Server, or any other `IDistributedCache` provider with a single config change.
@@ -579,6 +581,12 @@ To observe HybridCache behaviour across multiple server instances:
 6. Use the **Stampede Test** on both instances with the same key to verify coalescing works across the shared L2
 
 With `DistributedMemoryCache` (default), L2 is in-process per instance — cross-instance invalidation is not supported. This is intentional for local development.
+
+---
+
+## License
+
+This project is licensed under the [MIT License](LICENSE). You are free to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of this software with no restrictions beyond attribution.
 
 ---
 

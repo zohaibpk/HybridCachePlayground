@@ -7,11 +7,13 @@ namespace HybridCachePlayground.Web.Services;
 public sealed class CachePlaygroundService : ICachePlaygroundService
 {
     private readonly HybridCache _cache;
+    private readonly int _defaultTtlMinutes;
+    private readonly int _defaultLocalTtlMinutes;
 
     // Active entries (pruned on expiry)
     private readonly ConcurrentDictionary<string, CacheEntryMetadata> _metadata = new();
 
-    // All-time registries (never cleared, survive eviction)
+    // All-time registries — survive eviction, reset on app restart
     private readonly ConcurrentDictionary<string, KeyRegistryEntry> _keyRegistry = new();
     private readonly ConcurrentDictionary<string, TagRegistryEntry> _tagRegistry = new();
 
@@ -19,25 +21,41 @@ public sealed class CachePlaygroundService : ICachePlaygroundService
     private long _misses;
     private long _factoryInvocations;
 
-    public CachePlaygroundService(HybridCache cache)
+    public CachePlaygroundService(HybridCache cache, IConfiguration configuration)
     {
         _cache = cache;
+        _defaultTtlMinutes = configuration.GetValue("HybridCache:DefaultExpirationMinutes", 5);
+        _defaultLocalTtlMinutes = configuration.GetValue("HybridCache:LocalCacheExpirationMinutes", 2);
     }
+
+    // ─── Helpers ─────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Tags are normalized to lowercase-trimmed on every write so all
+    /// comparisons can use ordinal exact-match — no repeated OrdinalIgnoreCase.
+    /// </summary>
+    private static string NormalizeTag(string tag) => tag.Trim().ToLowerInvariant();
+
+    private static List<string> NormalizeTags(IEnumerable<string> tags) =>
+        tags.Select(NormalizeTag).Distinct().ToList();
+
+    private HybridCacheEntryOptions MakeOptions(int expirationMinutes) => new()
+    {
+        Expiration = TimeSpan.FromMinutes(expirationMinutes),
+        LocalCacheExpiration = TimeSpan.FromMinutes(
+            Math.Min(expirationMinutes, _defaultLocalTtlMinutes))
+    };
 
     // ─── Set ─────────────────────────────────────────────────────────────────
 
     public async Task SetAsync(string key, string value, IEnumerable<string> tags, int expirationMinutes, CancellationToken ct = default)
     {
-        var tagList = tags.ToList();
-        var options = new HybridCacheEntryOptions
-        {
-            Expiration = TimeSpan.FromMinutes(expirationMinutes),
-            LocalCacheExpiration = TimeSpan.FromMinutes(Math.Min(expirationMinutes, 2))
-        };
+        var tagList = NormalizeTags(tags);
 
-        await _cache.SetAsync(key, value, options, tagList, ct);
+        await _cache.SetAsync(key, value, MakeOptions(expirationMinutes), tagList, ct);
 
         var now = DateTimeOffset.UtcNow;
+        var expiresAt = now.AddMinutes(expirationMinutes);
 
         _metadata[key] = new CacheEntryMetadata
         {
@@ -45,50 +63,11 @@ public sealed class CachePlaygroundService : ICachePlaygroundService
             Value = value,
             Tags = tagList,
             CreatedAt = now,
-            ExpiresAt = now.AddMinutes(expirationMinutes)
+            ExpiresAt = expiresAt
         };
 
-        // Update key registry
-        _keyRegistry.AddOrUpdate(key,
-            _ => new KeyRegistryEntry
-            {
-                Key = key,
-                FirstSeen = now,
-                LastSeen = now,
-                TimesSet = 1,
-                LastKnownTags = tagList,
-                IsCurrentlyActive = true
-            },
-            (_, existing) =>
-            {
-                existing.LastSeen = now;
-                existing.TimesSet++;
-                existing.LastKnownTags = tagList;
-                existing.IsCurrentlyActive = true;
-                return existing;
-            });
-
-        // Update tag registry
-        foreach (var tag in tagList)
-        {
-            _tagRegistry.AddOrUpdate(tag,
-                _ => new TagRegistryEntry
-                {
-                    Tag = tag,
-                    TimesUsed = 1,
-                    FirstSeen = now,
-                    LastSeen = now,
-                    KnownKeys = [key]
-                },
-                (_, existing) =>
-                {
-                    existing.TimesUsed++;
-                    existing.LastSeen = now;
-                    if (!existing.KnownKeys.Contains(key))
-                        existing.KnownKeys.Add(key);
-                    return existing;
-                });
-        }
+        RegisterKey(key, tagList, now);
+        RegisterTags(tagList, key, now);
     }
 
     // ─── Get / GetOrCreate ────────────────────────────────────────────────────
@@ -98,7 +77,7 @@ public sealed class CachePlaygroundService : ICachePlaygroundService
         var factoryRan = false;
         string? factoryLabel = null;
 
-        var value = await _cache.GetOrCreateAsync(key, async innerCt =>
+        var value = await _cache.GetOrCreateAsync(key, innerCt =>
         {
             factoryRan = true;
             Interlocked.Increment(ref _factoryInvocations);
@@ -106,8 +85,7 @@ public sealed class CachePlaygroundService : ICachePlaygroundService
             var (label, json) = RandomDataFactory.Generate();
             factoryLabel = label;
 
-            await Task.CompletedTask;
-            return json;
+            return ValueTask.FromResult(json);
         }, cancellationToken: ct);
 
         var isHit = !factoryRan && value is not null;
@@ -130,68 +108,27 @@ public sealed class CachePlaygroundService : ICachePlaygroundService
             if (_keyRegistry.TryGetValue(key, out var keyEntry))
                 Interlocked.Increment(ref keyEntry.Misses);
 
-            // Factory ran — store the generated value in our metadata
             if (factoryRan && value is not null)
             {
-                var defaultTtl = 5;
+                // Cache the factory-generated entry in our metadata tracker
+                var autoTags = new List<string> { "factory-generated", NormalizeTag(factoryLabel ?? "unknown") };
+
                 _metadata[key] = new CacheEntryMetadata
                 {
                     Key = key,
                     Value = value,
-                    Tags = ["factory-generated", factoryLabel?.ToLower() ?? "unknown"],
+                    Tags = autoTags,
                     CreatedAt = now,
-                    ExpiresAt = now.AddMinutes(defaultTtl),
+                    ExpiresAt = now.AddMinutes(_defaultTtlMinutes),
                     FactoryGenerated = true,
                     FactoryLabel = factoryLabel
                 };
 
-                // Register key and auto-tags
-                var autoTags = new List<string> { "factory-generated", factoryLabel?.ToLower() ?? "unknown" };
-
-                _keyRegistry.AddOrUpdate(key,
-                    _ => new KeyRegistryEntry
-                    {
-                        Key = key,
-                        FirstSeen = now,
-                        LastSeen = now,
-                        TimesSet = 1,
-                        LastKnownTags = autoTags,
-                        IsCurrentlyActive = true,
-                        Misses = 1
-                    },
-                    (_, existing) =>
-                    {
-                        existing.LastSeen = now;
-                        existing.TimesSet++;
-                        existing.LastKnownTags = autoTags;
-                        existing.IsCurrentlyActive = true;
-                        return existing;
-                    });
-
-                foreach (var tag in autoTags)
-                {
-                    _tagRegistry.AddOrUpdate(tag,
-                        _ => new TagRegistryEntry
-                        {
-                            Tag = tag,
-                            TimesUsed = 1,
-                            FirstSeen = now,
-                            LastSeen = now,
-                            KnownKeys = [key]
-                        },
-                        (_, existing) =>
-                        {
-                            existing.TimesUsed++;
-                            existing.LastSeen = now;
-                            if (!existing.KnownKeys.Contains(key))
-                                existing.KnownKeys.Add(key);
-                            return existing;
-                        });
-                }
+                RegisterKey(key, autoTags, now);
+                RegisterTags(autoTags, key, now);
             }
             else if (factoryRan)
             {
-                // Factory ran but returned null — key was never set
                 _metadata.TryRemove(key, out _);
             }
         }
@@ -217,19 +154,17 @@ public sealed class CachePlaygroundService : ICachePlaygroundService
             if (_keyRegistry.TryGetValue(key, out var k)) k.IsCurrentlyActive = false;
         }
 
-        // Local counter — counts how many times the factory actually executes in this test run
         var localFactoryHits = 0;
         string? capturedValue = null;
         var sw = System.Diagnostics.Stopwatch.StartNew();
 
-        // Fire all requests simultaneously
         var tasks = Enumerable.Range(0, concurrency).Select(_ =>
             _cache.GetOrCreateAsync(key, async innerCt =>
             {
                 Interlocked.Increment(ref localFactoryHits);
                 Interlocked.Increment(ref _factoryInvocations);
 
-                // Simulate a brief async factory (makes the coalescing visible)
+                // 50ms delay widens the coalescing window so the test is meaningful
                 await Task.Delay(50, innerCt);
 
                 var (_, json) = RandomDataFactory.Generate();
@@ -244,37 +179,31 @@ public sealed class CachePlaygroundService : ICachePlaygroundService
         var successCount = results.Count(v => v is not null);
         var now = DateTimeOffset.UtcNow;
 
-        // Record in metadata if the factory ran and produced a value
         if (localFactoryHits > 0 && capturedValue is not null)
         {
             var tags = new List<string> { "factory-generated", "stampede-test" };
+
             _metadata[key] = new CacheEntryMetadata
             {
                 Key = key,
                 Value = capturedValue,
                 Tags = tags,
                 CreatedAt = now,
-                ExpiresAt = now.AddMinutes(5),
+                ExpiresAt = now.AddMinutes(_defaultTtlMinutes),
                 FactoryGenerated = true,
                 FactoryLabel = "Stampede"
             };
 
-            _keyRegistry.AddOrUpdate(key,
-                _ => new KeyRegistryEntry { Key = key, FirstSeen = now, LastSeen = now, TimesSet = 1, LastKnownTags = tags, IsCurrentlyActive = true },
-                (_, e) => { e.LastSeen = now; e.TimesSet++; e.LastKnownTags = tags; e.IsCurrentlyActive = true; return e; });
-
-            foreach (var tag in tags)
-                _tagRegistry.AddOrUpdate(tag,
-                    _ => new TagRegistryEntry { Tag = tag, TimesUsed = 1, FirstSeen = now, LastSeen = now, KnownKeys = [key] },
-                    (_, e) => { e.TimesUsed++; e.LastSeen = now; if (!e.KnownKeys.Contains(key)) e.KnownKeys.Add(key); return e; });
+            RegisterKey(key, tags, now);
+            RegisterTags(tags, key, now);
         }
 
-        // Update hit/miss counters: 1 miss (the factory call) + (concurrency-1) hits
+        // 1 miss (factory ran) + (successCount - 1) hits coalesced by HybridCache
         if (localFactoryHits > 0)
         {
             Interlocked.Increment(ref _misses);
-            var hitCount = successCount - 1;
-            if (hitCount > 0) Interlocked.Add(ref _hits, hitCount);
+            var coalesced = successCount - 1;
+            if (coalesced > 0) Interlocked.Add(ref _hits, coalesced);
         }
         else
         {
@@ -305,12 +234,14 @@ public sealed class CachePlaygroundService : ICachePlaygroundService
 
     public async Task<int> RemoveByTagAsync(string tag, CancellationToken ct = default)
     {
-        await _cache.RemoveByTagAsync(tag, ct);
+        var normalizedTag = NormalizeTag(tag);
+        await _cache.RemoveByTagAsync(normalizedTag, ct);
 
         var removed = 0;
         foreach (var kvp in _metadata)
         {
-            if (kvp.Value.Tags.Contains(tag, StringComparer.OrdinalIgnoreCase))
+            // Exact match — safe because all tags are normalized on write
+            if (kvp.Value.Tags.Contains(normalizedTag))
             {
                 if (_metadata.TryRemove(kvp.Key, out _))
                 {
@@ -349,6 +280,7 @@ public sealed class CachePlaygroundService : ICachePlaygroundService
     public IReadOnlyList<KeyRegistryEntry> GetKeyRegistry()
     {
         var activeKeys = _metadata.Keys.ToHashSet();
+
         foreach (var entry in _keyRegistry.Values)
             entry.IsCurrentlyActive = activeKeys.Contains(entry.Key);
 
@@ -357,9 +289,18 @@ public sealed class CachePlaygroundService : ICachePlaygroundService
 
     public IReadOnlyList<TagRegistryEntry> GetTagRegistry()
     {
+        // Single pass over active metadata to build tag → count map.
+        // O(entries × avg-tags-per-entry) instead of O(tags × entries).
+        var activeTagCounts = new Dictionary<string, int>();
+        foreach (var meta in _metadata.Values)
+        {
+            if (meta.IsExpired) continue;
+            foreach (var tag in meta.Tags)
+                activeTagCounts[tag] = activeTagCounts.GetValueOrDefault(tag) + 1;
+        }
+
         foreach (var entry in _tagRegistry.Values)
-            entry.ActiveEntries = _metadata.Values.Count(m =>
-                !m.IsExpired && m.Tags.Contains(entry.Tag, StringComparer.OrdinalIgnoreCase));
+            entry.ActiveEntries = activeTagCounts.GetValueOrDefault(entry.Tag, 0);
 
         return _tagRegistry.Values.OrderByDescending(e => e.TimesUsed).ToList();
     }
@@ -371,6 +312,54 @@ public sealed class CachePlaygroundService : ICachePlaygroundService
             _metadata.TryRemove(kvp.Key, out _);
             if (_keyRegistry.TryGetValue(kvp.Key, out var entry))
                 entry.IsCurrentlyActive = false;
+        }
+    }
+
+    // ─── Private registry helpers ─────────────────────────────────────────────
+
+    private void RegisterKey(string key, List<string> tags, DateTimeOffset now)
+    {
+        _keyRegistry.AddOrUpdate(key,
+            _ => new KeyRegistryEntry
+            {
+                Key = key,
+                FirstSeen = now,
+                LastSeen = now,
+                TimesSet = 1,
+                LastKnownTags = tags,
+                IsCurrentlyActive = true
+            },
+            (_, existing) =>
+            {
+                existing.LastSeen = now;
+                existing.TimesSet++;
+                existing.LastKnownTags = tags;
+                existing.IsCurrentlyActive = true;
+                return existing;
+            });
+    }
+
+    private void RegisterTags(List<string> tags, string key, DateTimeOffset now)
+    {
+        foreach (var tag in tags)
+        {
+            _tagRegistry.AddOrUpdate(tag,
+                _ => new TagRegistryEntry
+                {
+                    Tag = tag,
+                    TimesUsed = 1,
+                    FirstSeen = now,
+                    LastSeen = now,
+                    KnownKeys = [key]
+                },
+                (_, existing) =>
+                {
+                    existing.TimesUsed++;
+                    existing.LastSeen = now;
+                    if (!existing.KnownKeys.Contains(key))
+                        existing.KnownKeys.Add(key);
+                    return existing;
+                });
         }
     }
 }
