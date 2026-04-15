@@ -68,6 +68,23 @@ public class CacheController : Controller
         return RedirectToAction(nameof(Remove));
     }
 
+    // ─── Stampede test ───────────────────────────────────────────────────────
+
+    [HttpGet]
+    public IActionResult Stampede() => View(new StampedeRequest());
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> Stampede(StampedeRequest model)
+    {
+        if (!ModelState.IsValid)
+            return View(model);
+
+        var result = await _cacheService.RunStampedeTestAsync(model.Key, model.Concurrency, model.ForceEvict);
+        ViewData["Result"] = result;
+        return View(model);
+    }
+
     // ─── Remove by tag ───────────────────────────────────────────────────────
 
     [HttpGet]

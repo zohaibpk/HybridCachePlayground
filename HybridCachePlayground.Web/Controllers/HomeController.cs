@@ -19,7 +19,9 @@ public class HomeController : Controller
         var vm = new DashboardViewModel
         {
             Entries = _cacheService.GetAllEntries().ToList(),
-            Stats = _cacheService.GetStats()
+            Stats = _cacheService.GetStats(),
+            KeyRegistry = _cacheService.GetKeyRegistry().ToList(),
+            TagRegistry = _cacheService.GetTagRegistry().ToList()
         };
         return View(vm);
     }

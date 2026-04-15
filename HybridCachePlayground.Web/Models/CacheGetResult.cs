@@ -6,4 +6,5 @@ public class CacheGetResult
     public string? Value { get; set; }
     public bool IsHit { get; set; }
     public bool HasResult { get; set; }
+    public string? FactoryLabel { get; set; }
 }

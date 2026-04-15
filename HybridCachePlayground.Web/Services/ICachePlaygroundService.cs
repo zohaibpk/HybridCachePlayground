@@ -8,6 +8,8 @@ public interface ICachePlaygroundService
 
     Task<CacheGetResult> GetOrCreateAsync(string key, CancellationToken ct = default);
 
+    Task<StampedeResult> RunStampedeTestAsync(string key, int concurrency, bool forceEvict, CancellationToken ct = default);
+
     Task RemoveAsync(string key, CancellationToken ct = default);
 
     Task<int> RemoveByTagAsync(string tag, CancellationToken ct = default);
@@ -15,6 +17,10 @@ public interface ICachePlaygroundService
     IReadOnlyList<CacheEntryMetadata> GetAllEntries();
 
     CacheStats GetStats();
+
+    IReadOnlyList<KeyRegistryEntry> GetKeyRegistry();
+
+    IReadOnlyList<TagRegistryEntry> GetTagRegistry();
 
     void PruneExpired();
 }

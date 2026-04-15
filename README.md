@@ -19,6 +19,10 @@ The project defaults to **IMemoryCache (L1) + DistributedMemoryCache (L2)** so i
   - [Get Entry](#get-entry)
   - [Remove by Key](#remove-by-key)
   - [Remove by Tag](#remove-by-tag)
+  - [Stampede Test](#stampede-test)
+- [Random Data Factory](#random-data-factory)
+- [Key Registry](#key-registry)
+- [Tag Registry](#tag-registry)
 - [Configuration](#configuration)
 - [Switching the L2 Cache Backend](#switching-the-l2-cache-backend)
   - [NCache](#ncache)
@@ -55,8 +59,12 @@ Key advantages over using `IMemoryCache` or `IDistributedCache` directly:
 
 - **Interactive UI** — set, get, and remove cache entries directly in the browser
 - **Hit / Miss detection** — every Get operation shows whether the value came from cache or the factory ran
+- **Random data factory** — cache misses on the Get page auto-generate realistic JSON payloads (User, Product, Order, Session, Analytics, Employee) so you always have data to inspect
 - **Tag management** — assign multiple tags per entry, then bulk-evict by tag
-- **Live dashboard** — see all tracked entries, their tags, TTL countdown, and hit/miss counters
+- **Live dashboard** — active entries with expandable values, tag count badges, source labels (manual vs factory), TTL countdown, and hit/miss stats
+- **Key Registry** — all-time record of every key ever used: times set, hits, misses, per-key hit ratio, active status
+- **Tag Registry** — all-time record of every tag ever used: usage count, active entry count, associated keys, quick evict button
+- **Stampede protection test** — fire N concurrent requests for the same uncached key; proves the factory runs exactly once
 - **Configurable TTLs** — per-entry expiration via the Set form; defaults configurable in `appsettings.json`
 - **Swappable L2 backend** — replace one line in `Program.cs` to switch to NCache or SQL Server
 - **Zero infrastructure** — runs entirely in-process by default, no external services needed
@@ -79,7 +87,7 @@ No database, cache server, or Docker required for the default setup.
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/<your-username>/HybridCachePlayground.git
+git clone https://github.com/zohaibpk/HybridCachePlayground.git
 cd HybridCachePlayground
 ```
 
@@ -98,7 +106,7 @@ dotnet run
 
 ### 4. Open in browser
 
-Navigate to the URL shown in the terminal (typically `https://localhost:5001` or `http://localhost:5000`).
+Navigate to the URL shown in the terminal (typically `http://localhost:5280`).
 
 ---
 
@@ -111,31 +119,37 @@ HybridCachePlayground/
 ├── README.md
 └── HybridCachePlayground.Web/
     ├── Controllers/
-    │   ├── HomeController.cs          # Dashboard + quick-remove action
-    │   └── CacheController.cs         # Set, Get, Remove, RemoveByTag actions
+    │   ├── HomeController.cs              # Dashboard + quick-remove action
+    │   └── CacheController.cs             # Set, Get, Remove, RemoveByTag, Stampede
     ├── Models/
-    │   ├── CacheEntryMetadata.cs      # Tracked entry (key, value, tags, expiry)
-    │   ├── CacheStats.cs              # Hit count, miss count, hit ratio
-    │   ├── CacheSetRequest.cs         # Form model for Set
-    │   ├── CacheGetRequest.cs         # Form model for Get
-    │   ├── CacheGetResult.cs          # Result of a Get (hit/miss flag + value)
-    │   ├── CacheRemoveRequest.cs      # Form model for Remove by key / by tag
-    │   └── DashboardViewModel.cs      # Entries + stats for the dashboard view
+    │   ├── CacheEntryMetadata.cs          # Active entry (key, value, tags, expiry, source)
+    │   ├── CacheStats.cs                  # Hits, misses, hit ratio, unique keys/tags, factory count
+    │   ├── CacheSetRequest.cs             # Form model for Set
+    │   ├── CacheGetRequest.cs             # Form model for Get
+    │   ├── CacheGetResult.cs              # Get result (hit/miss flag, value, factory label)
+    │   ├── CacheRemoveRequest.cs          # Form model for Remove by key / by tag
+    │   ├── DashboardViewModel.cs          # Entries + stats + key registry + tag registry
+    │   ├── KeyRegistryEntry.cs            # All-time key record
+    │   ├── TagRegistryEntry.cs            # All-time tag record
+    │   ├── StampedeRequest.cs             # Stampede test form model
+    │   └── StampedeResult.cs              # Stampede test result
     ├── Services/
-    │   ├── ICachePlaygroundService.cs # Service interface
-    │   └── CachePlaygroundService.cs  # HybridCache wrapper + metadata tracker
+    │   ├── ICachePlaygroundService.cs     # Service interface
+    │   ├── CachePlaygroundService.cs      # HybridCache wrapper + metadata + registries
+    │   └── RandomDataFactory.cs           # Random JSON generator (6 templates)
     ├── Views/
     │   ├── Home/
-    │   │   └── Index.cshtml           # Dashboard
+    │   │   └── Index.cshtml               # Dashboard
     │   ├── Cache/
     │   │   ├── Set.cshtml
     │   │   ├── Get.cshtml
     │   │   ├── Remove.cshtml
-    │   │   └── RemoveByTag.cshtml
+    │   │   ├── RemoveByTag.cshtml
+    │   │   └── Stampede.cshtml            # Stampede protection test
     │   └── Shared/
-    │       └── _Layout.cshtml         # Bootstrap 5 layout + nav
-    ├── Program.cs                     # DI registration + middleware pipeline
-    └── appsettings.json               # TTL defaults
+    │       └── _Layout.cshtml             # Bootstrap 5 layout + nav
+    ├── Program.cs                         # DI registration + middleware pipeline
+    └── appsettings.json                   # TTL defaults
 ```
 
 ---
@@ -146,12 +160,35 @@ HybridCachePlayground/
 
 **Route:** `/`
 
-The home page shows a live snapshot of all tracked cache entries:
+The home page shows a full live snapshot of cache state.
 
-- **Stats row** — active entry count, total hits, total misses, hit ratio percentage
-- **Entry table** — key, value preview, tags (as badges), creation time, time-until-expiry, last accessed time
-- **Inline Remove** — remove any individual entry without leaving the dashboard
-- Expired entries are visually struck-through and pruned automatically on each load
+**Stats row (7 cards):**
+
+| Card | Description |
+|---|---|
+| Active Entries | Entries currently in cache and not expired |
+| Cache Hits | Total successful cache reads across all Get operations |
+| Cache Misses | Total factory invocations from Get operations |
+| Hit Ratio | `Hits / (Hits + Misses) × 100` |
+| Unique Keys (all-time) | Total distinct keys ever written in this session |
+| Unique Tags (all-time) | Total distinct tags ever used in this session |
+| Factory Invocations | Total times the random data factory has run |
+
+**Active entries table:**
+
+| Column | Description |
+|---|---|
+| Key | Cache key |
+| Value | Collapsed by default — click **View** to expand the full JSON |
+| Tags # | Badge showing how many tags the entry carries |
+| Tags | Tag badges |
+| Source | `manual` (Set page) or `factory · <Template>` (auto-generated on miss) |
+| Created | Time the entry was stored |
+| Expires In | Countdown — turns red when expired |
+| Last Hit | Time of last cache read for this entry |
+| Remove | Inline evict button |
+
+Below the entry table, the page shows the **Key Registry** and **Tag Registry** (see below).
 
 ---
 
@@ -191,7 +228,7 @@ await hybridCache.SetAsync(
 Retrieves a value using `GetOrCreateAsync`. The result page shows:
 
 - **HIT** (green) — value was found in cache; factory did not run
-- **MISS** (red) — value was not in cache; factory ran (returns `null` in this playground since there is no real data source)
+- **MISS** (red) — value was not in cache; the **random data factory** ran and generated a new JSON payload, which is now cached and visible on the dashboard
 
 **API called:**
 
@@ -200,13 +237,13 @@ var value = await hybridCache.GetOrCreateAsync(
     key,
     async ct =>
     {
-        // Only called on a cache miss
-        // Stampede-safe: runs once even under concurrent requests
-        return await FetchFromSource(ct);
+        // Called on cache miss only — generates random JSON
+        var (_, json) = RandomDataFactory.Generate();
+        return json;
     });
 ```
 
-> **Stampede protection:** if 50 requests arrive for the same uncached key simultaneously, HybridCache serialises them — the factory runs exactly once and the result is shared with all waiting callers.
+> On a miss the generated entry is automatically tagged `factory-generated` and the template label (e.g. `user`, `order`) so it can be bulk-evicted later.
 
 ---
 
@@ -238,7 +275,7 @@ Evicts **all** entries that were stored with the given tag, across both cache ti
 await hybridCache.RemoveByTagAsync(tag);
 ```
 
-The dashboard count shows how many tracked entries were evicted.
+The result message shows how many tracked entries were evicted.
 
 **Example tag patterns:**
 
@@ -247,7 +284,122 @@ The dashboard count shows how many tracked entries were evicted.
 | `tenant-5` | Evict all data for a specific tenant |
 | `users` | Evict all user-related entries after a bulk update |
 | `catalog` | Evict all product cache entries after a price change |
+| `factory-generated` | Evict all auto-generated entries at once |
 | `session-abc` | Evict all entries tied to a user session on logout |
+
+---
+
+### Stampede Test
+
+**Route:** `/cache/stampede`  
+**Nav:** ⚡ Stampede Test
+
+Demonstrates HybridCache's built-in **stampede (cache stampede / thundering herd) protection**.
+
+**How it works:**
+
+1. Optionally evicts the key first to guarantee a cold cache miss
+2. Creates N tasks, all calling `GetOrCreateAsync` for the same key simultaneously
+3. All tasks are released at once via `Task.WhenAll`
+4. The factory includes a 50ms artificial delay to widen the coalescing window
+5. Results are displayed immediately after all tasks complete
+
+**Result display:**
+
+| Metric | Expected value |
+|---|---|
+| Concurrent Requests | Whatever you configured (2–100) |
+| Factory Ran | **1** — HybridCache coalesces all concurrent misses |
+| Successful Responses | Equal to Concurrent Requests |
+| Total Time | ~50ms (factory delay), not N × 50ms |
+
+A visual bar chart shows which request ran the factory (green) vs which ones waited for the result (blue).
+
+**Why this matters:**
+
+With plain `IMemoryCache`, if 50 requests arrive for an uncached key simultaneously, all 50 see a miss and invoke the factory — potentially firing 50 database queries. HybridCache uses a per-key lock so the factory runs once and all waiting callers receive the same result.
+
+**API demonstrated:**
+
+```csharp
+// All 50 tasks call this simultaneously
+var value = await hybridCache.GetOrCreateAsync(key, async ct =>
+{
+    // HybridCache guarantees this runs exactly once
+    await Task.Delay(50, ct); // simulates real async work
+    return await FetchFromDatabase(ct);
+});
+```
+
+---
+
+## Random Data Factory
+
+**File:** `Services/RandomDataFactory.cs`
+
+When a cache miss occurs on the Get page or during a Stampede test, the random data factory generates a realistic JSON payload instead of returning null. This means you always have inspectable data without needing a real backend.
+
+**6 templates — 3 to 5 fields randomly selected per call:**
+
+| Template | Example Fields |
+|---|---|
+| **User** | `id`, `firstName`, `lastName`, `email`, `role`, `department`, `status` |
+| **Product** | `id`, `name`, `price`, `category`, `stock`, `status`, `tier` |
+| **Order** | `orderId`, `customerId`, `total`, `status`, `createdAt`, `itemCount`, `priority` |
+| **Session** | `sessionId`, `userId`, `ipAddress`, `expiresAt`, `role`, `country` |
+| **Analytics** | `eventId`, `userId`, `action`, `city`, `country`, `timestamp` |
+| **Employee** | `id`, `firstName`, `lastName`, `department`, `salary`, `createdAt`, `status` |
+
+**Example output (User template, 4 fields):**
+
+```json
+{
+  "id": 4821,
+  "firstName": "Alice",
+  "role": "Developer",
+  "department": "Engineering"
+}
+```
+
+Factory-generated entries are automatically tagged `factory-generated` and the lowercase template name (e.g. `user`, `order`), making them easy to bulk-evict via Remove by Tag.
+
+---
+
+## Key Registry
+
+Displayed on the Dashboard below the active entries table.
+
+The Key Registry is a **permanent in-memory record** of every cache key ever written during the current session. It persists through cache evictions and TTL expiry — a key that has expired from the cache still appears in the registry.
+
+| Column | Description |
+|---|---|
+| Key | The cache key |
+| Times Set | How many times `SetAsync` or the factory wrote this key |
+| Hits | Number of successful cache reads for this key |
+| Misses | Number of factory invocations for this key |
+| Hit % | Per-key hit ratio |
+| Last Known Tags | Tags from the most recent write |
+| First Seen | When the key was first written |
+| Last Seen | When the key was most recently written or read |
+| Active | Whether the key currently exists in the cache |
+
+---
+
+## Tag Registry
+
+Displayed on the Dashboard below the Key Registry.
+
+The Tag Registry is a **permanent in-memory record** of every tag ever used during the current session.
+
+| Column | Description |
+|---|---|
+| Tag | The tag name |
+| Times Used | How many `SetAsync` calls included this tag |
+| Active Entries | How many currently-active cache entries carry this tag |
+| Associated Keys | Keys that have ever been stored with this tag |
+| First Seen | When the tag was first used |
+| Last Seen | When the tag was most recently used |
+| Evict button | Quick link to Remove by Tag pre-filled with this tag |
 
 ---
 
@@ -269,7 +421,7 @@ The dashboard count shows how many tracked entries were evicted.
 | `DefaultExpirationMinutes` | `5` | Default L2 (and combined) TTL for all entries |
 | `LocalCacheExpirationMinutes` | `2` | Default L1 (in-process) TTL — should be ≤ `DefaultExpirationMinutes` |
 
-Per-entry TTL can be overridden on the Set form.
+Per-entry TTL can be overridden on the Set form. Factory-generated entries always use the default TTL.
 
 ---
 
@@ -358,7 +510,7 @@ Request
     └────┬────┘         │  Default: DistributedMemoryCache │  Survives process restarts
          │ MISS         │  Swap: NCache / SQL Server       │  (when using external L2)
     ┌────▼────┐         └─────────────────────────────────┘
-    │ Factory │  Value computed here, then populated into L2 and L1
+    │ Factory │  RandomDataFactory.Generate() or your real data source
     └─────────┘
 ```
 
@@ -368,23 +520,28 @@ Request
 
 | Method | Description |
 |---|---|
-| `SetAsync` | Stores a value with tags and TTL |
-| `GetOrCreateAsync` | Retrieves a value; detects and reports hit vs miss |
-| `RemoveAsync` | Evicts a single key |
+| `SetAsync` | Stores a value with tags and TTL; updates key/tag registries |
+| `GetOrCreateAsync` | Retrieves a value; invokes `RandomDataFactory` on miss; records hit/miss |
+| `RemoveAsync` | Evicts a single key; marks it inactive in the key registry |
 | `RemoveByTagAsync` | Evicts all keys with a given tag; returns count of evicted entries |
-| `GetAllEntries` | Returns the tracked metadata list (for the dashboard) |
-| `GetStats` | Returns hit/miss counts and active entry count |
+| `RunStampedeTestAsync` | Fires N concurrent `GetOrCreateAsync` calls; reports factory invocation count |
+| `GetAllEntries` | Returns active metadata (pruned of expired entries) |
+| `GetStats` | Returns hits, misses, hit ratio, unique key/tag counts, factory invocations |
+| `GetKeyRegistry` | Returns all-time key history |
+| `GetTagRegistry` | Returns all-time tag history with live active-entry counts |
 | `PruneExpired` | Removes expired entries from the metadata store |
 
 ### Metadata Tracking
 
-HybridCache does not expose a "list all keys" API. To power the dashboard, `CachePlaygroundService` maintains a `ConcurrentDictionary<string, CacheEntryMetadata>` in memory alongside the cache. This dictionary stores:
+HybridCache does not expose a "list all keys" API. The service maintains three in-memory stores:
 
-- Key, value, tags
-- Creation time and expiry time
-- Last accessed time (updated on cache hits)
+| Store | Type | Lifetime | Purpose |
+|---|---|---|---|
+| `_metadata` | `ConcurrentDictionary<string, CacheEntryMetadata>` | Cleared on expiry/remove | Powers the active entries table |
+| `_keyRegistry` | `ConcurrentDictionary<string, KeyRegistryEntry>` | Session-lived (never cleared) | Powers the Key Registry table |
+| `_tagRegistry` | `ConcurrentDictionary<string, TagRegistryEntry>` | Session-lived (never cleared) | Powers the Tag Registry table |
 
-Entries are pruned from the dictionary automatically when the dashboard loads or when they are explicitly removed. Note that the metadata dictionary is in-process — it resets on app restart, even if an external L2 cache retains the values.
+All three stores reset on app restart. If you switch to an external L2 backend, previously cached values survive a restart but the in-memory tracking does not.
 
 ---
 
@@ -413,12 +570,13 @@ To observe HybridCache behaviour across multiple server instances:
 1. Switch the L2 backend to **NCache** (see [Switching the L2 Cache Backend](#switching-the-l2-cache-backend))
 2. Run two instances of the app on different ports:
    ```bash
-   dotnet run --urls "https://localhost:5001"  # Terminal 1
-   dotnet run --urls "https://localhost:5002"  # Terminal 2
+   dotnet run --urls "http://localhost:5280"  # Terminal 1
+   dotnet run --urls "http://localhost:5281"  # Terminal 2
    ```
 3. Set an entry on instance 1 — it lands in NCache (L2)
 4. Get the same key on instance 2 — L1 is cold, but L2 serves the value (hit)
 5. Remove by tag on instance 1 — the eviction propagates via NCache; instance 2's L1 is also invalidated on next access
+6. Use the **Stampede Test** on both instances with the same key to verify coalescing works across the shared L2
 
 With `DistributedMemoryCache` (default), L2 is in-process per instance — cross-instance invalidation is not supported. This is intentional for local development.
 
@@ -426,8 +584,9 @@ With `DistributedMemoryCache` (default), L2 is in-process per instance — cross
 
 ## Roadmap
 
-- [ ] Add an API controller exposing all operations as JSON endpoints
+- [ ] Operation log — live feed of every Set/Get/Remove with timestamp, result, and duration
+- [ ] Seed data button — one-click bulk-load of a predefined dataset with varied tags
+- [ ] Sliding expiry support — toggle between absolute and sliding TTL on the Set form
 - [ ] NCache integration guide with Docker Compose setup
-- [ ] Cache warm-up / pre-population script
 - [ ] Expiry auto-refresh on the dashboard (JavaScript polling)
-- [ ] Request timeline view — visualise stampede protection under concurrent load
+- [ ] API controller — JSON endpoints exposing all cache operations for programmatic testing

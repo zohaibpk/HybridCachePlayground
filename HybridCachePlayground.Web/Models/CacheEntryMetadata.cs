@@ -8,6 +8,8 @@ public class CacheEntryMetadata
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset ExpiresAt { get; set; }
     public DateTimeOffset? LastAccessedAt { get; set; }
+    public bool FactoryGenerated { get; set; }
+    public string? FactoryLabel { get; set; }
 
     public bool IsExpired => DateTimeOffset.UtcNow > ExpiresAt;
 
