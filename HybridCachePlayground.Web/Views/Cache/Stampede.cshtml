@@ -2,7 +2,9 @@
 @model HybridCachePlayground.Web.Models.StampedeRequest
 @{
     ViewData["Title"] = "Stampede Test";
-    var result = ViewData["Result"] as StampedeResult;
+    var result      = ViewData["Result"] as StampedeResult;
+    var maxConc     = (int)(ViewData["StampedeMax"] ?? 200);
+    var recentKeys  = ViewData["RecentKeys"] as List<string> ?? new();
 }
 
 <h2 class="mb-1">Stampede Protection Test</h2>
@@ -19,33 +21,52 @@
             <div class="card-body">
                 <form asp-action="Stampede" method="post">
                     @Html.AntiForgeryToken()
+
                     <div class="mb-3">
                         <label asp-for="Key" class="form-label fw-semibold">Cache Key</label>
-                        <input asp-for="Key" class="form-control" placeholder="stampede-test" />
+                        <input asp-for="Key" id="Key" class="form-control" placeholder="stampede-test" />
                         <span asp-validation-for="Key" class="text-danger small"></span>
+                        @if (recentKeys.Any())
+                        {
+                            <div class="mt-1">
+                                <small class="text-muted">Recent: </small>
+                                @foreach (var k in recentKeys)
+                                {
+                                    <button type="button" class="btn btn-sm btn-outline-secondary chip-suggest"
+                                            data-fill-id="Key" data-fill-val="@k">@k</button>
+                                }
+                            </div>
+                        }
                     </div>
+
                     <div class="mb-3">
                         <label asp-for="Concurrency" class="form-label fw-semibold">
                             Concurrent Requests
-                            <span class="text-muted fw-normal">(2–100)</span>
+                            <span class="text-muted fw-normal">(2–@maxConc)</span>
                         </label>
-                        <input asp-for="Concurrency" type="number" class="form-control" min="2" max="100" />
+                        <input asp-for="Concurrency" type="number" class="form-control"
+                               min="2" max="@maxConc" />
                         <span asp-validation-for="Concurrency" class="text-danger small"></span>
-                        <div class="form-text">All requests are fired simultaneously via <code>Task.WhenAll</code>.</div>
+                        <div class="form-text">
+                            All requests are fired simultaneously via <code>Task.WhenAll</code>.
+                            Max concurrency is configurable via <code>HybridCache:StampedeMaxConcurrency</code>.
+                        </div>
                     </div>
+
                     <div class="mb-4 form-check">
                         <input asp-for="ForceEvict" type="checkbox" class="form-check-input" />
                         <label asp-for="ForceEvict" class="form-check-label">
                             Evict key before test <span class="text-muted small">(guarantees a cold cache miss)</span>
                         </label>
                     </div>
+
                     <button type="submit" class="btn btn-primary w-100">Run Stampede Test</button>
                 </form>
             </div>
         </div>
 
         <div class="card border-info mt-3">
-            <div class="card-header bg-info text-white small">How stampede protection works</div>
+            <div class="card-header bg-info small">How stampede protection works</div>
             <div class="card-body small">
                 <p>
                     Without stampede protection, if 50 requests arrive for the same uncached key
@@ -65,9 +86,9 @@
     <div class="col-md-7">
         @if (result is not null)
         {
-            var cardClass = result.FactoryInvocations == 0 ? "border-warning"
-                          : result.StampedeProtectionWorked ? "border-success"
-                          : "border-danger";
+            var cardClass   = result.FactoryInvocations == 0 ? "border-warning"
+                            : result.StampedeProtectionWorked ? "border-success"
+                            : "border-danger";
             var headerClass = result.FactoryInvocations == 0 ? "bg-warning text-dark"
                             : result.StampedeProtectionWorked ? "bg-success text-white"
                             : "bg-danger text-white";
@@ -131,10 +152,10 @@
             </div>
 
             <!-- Visual timeline -->
-            <div class="card border-secondary">
+            <div class="card">
                 <div class="card-header small fw-semibold">Request Timeline (conceptual)</div>
                 <div class="card-body p-2">
-                    <div class="position-relative" style="height:60px; background:#f8f9fa; border-radius:4px; overflow:hidden; padding:8px;">
+                    <div class="position-relative" style="height:60px; background:#0d1117; border-radius:4px; overflow:hidden; padding:8px; border:1px solid #2d3139;">
                         @{
                             var barCount = Math.Min(result.RequestCount, 40);
                             var barWidth = Math.Max(1, (int)(100.0 / barCount)) + "%";
@@ -163,10 +184,10 @@
         }
         else
         {
-            <div class="card border-light bg-light h-100">
+            <div class="card h-100" style="border-color:#2d3139;">
                 <div class="card-body d-flex align-items-center justify-content-center text-muted">
                     <div class="text-center">
-                        <div class="fs-1 mb-2">⚡</div>
+                        <div class="fs-1 mb-2">&#9889;</div>
                         <p>Configure and run the test to see results here.</p>
                         <p class="small mb-0">Try concurrency = 20 with <em>Force Evict</em> enabled.</p>
                     </div>
@@ -178,4 +199,11 @@
 
 @section Scripts {
     @{await Html.RenderPartialAsync("_ValidationScriptsPartial");}
+    <script>
+    document.querySelectorAll('[data-fill-id]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            document.getElementById(btn.getAttribute('data-fill-id')).value = btn.getAttribute('data-fill-val');
+        });
+    });
+    </script>
 }

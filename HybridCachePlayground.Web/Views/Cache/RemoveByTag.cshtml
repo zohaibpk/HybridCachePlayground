@@ -1,6 +1,7 @@
 @model HybridCachePlayground.Web.Models.CacheRemoveByTagRequest
 @{
     ViewData["Title"] = "Remove by Tag";
+    var allTags = ViewData["AllTags"] as List<string> ?? new();
 }
 
 <h2 class="mb-4">Remove by Tag</h2>
@@ -15,12 +16,23 @@
             @Html.AntiForgeryToken()
             <div class="mb-3">
                 <label asp-for="Tag" class="form-label fw-semibold">Tag</label>
-                <input asp-for="Tag" class="form-control" placeholder="e.g. users" />
+                <input asp-for="Tag" id="Tag" class="form-control" placeholder="e.g. users" />
                 <span asp-validation-for="Tag" class="text-danger small"></span>
                 <div class="form-text">
                     All entries that were stored with this tag will be evicted
                     from both L1 and L2 simultaneously.
                 </div>
+                @if (allTags.Any())
+                {
+                    <div class="mt-2">
+                        <small class="text-muted">Known tags: </small>
+                        @foreach (var t in allTags)
+                        {
+                            <button type="button" class="btn btn-sm btn-outline-danger chip-suggest"
+                                    data-fill-id="Tag" data-fill-val="@t">@t</button>
+                        }
+                    </div>
+                }
             </div>
             <button type="submit" class="btn btn-danger">Evict by Tag</button>
             <a asp-controller="Home" asp-action="Index" class="btn btn-link">Back to Dashboard</a>
@@ -28,14 +40,14 @@
     </div>
 
     <div class="col-md-5">
-        <div class="card border-secondary">
-            <div class="card-header bg-secondary text-white small">API used</div>
+        <div class="card">
+            <div class="card-header bg-secondary small">API used</div>
             <div class="card-body">
                 <pre class="small mb-0"><code>await hybridCache.RemoveByTagAsync(tag);</code></pre>
             </div>
         </div>
         <div class="card border-info mt-3">
-            <div class="card-header bg-info text-white small">Tag invalidation pattern</div>
+            <div class="card-header bg-info small">Tag invalidation pattern</div>
             <div class="card-body small">
                 <p>Tags are great for group invalidation:</p>
                 <ul class="mb-0">
@@ -50,4 +62,11 @@
 
 @section Scripts {
     @{await Html.RenderPartialAsync("_ValidationScriptsPartial");}
+    <script>
+    document.querySelectorAll('[data-fill-id]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            document.getElementById(btn.getAttribute('data-fill-id')).value = btn.getAttribute('data-fill-val');
+        });
+    });
+    </script>
 }

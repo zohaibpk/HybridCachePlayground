@@ -5,7 +5,15 @@
 
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h2 class="mb-0">Cache Dashboard</h2>
-    <a asp-controller="Home" asp-action="Index" class="btn btn-sm btn-outline-secondary">Refresh</a>
+    <div class="d-flex align-items-center gap-3">
+        <div class="form-check form-switch mb-0">
+            <input class="form-check-input" type="checkbox" id="autoRefreshToggle" />
+            <label class="form-check-label small text-muted" for="autoRefreshToggle">
+                Auto-refresh (5s)<span id="autoRefreshDot" class="d-none"></span>
+            </label>
+        </div>
+        <a asp-controller="Home" asp-action="Index" class="btn btn-sm btn-outline-secondary">Refresh</a>
+    </div>
 </div>
 
 <!-- ── Stats cards ──────────────────────────────────────────────────────── -->
@@ -51,8 +59,8 @@
         </div>
     </div>
     <div class="col-sm-4 col-lg-2">
-        <div class="card h-100" style="background:#6f42c1;color:white">
-            <div class="card-body text-center py-3">
+        <div class="card h-100" style="background:#6f42c1;">
+            <div class="card-body text-center py-3" style="color:#fff;">
                 <div class="fs-2 fw-bold">@Model.Stats.TotalUniqueTags</div>
                 <div class="small">Unique Tags (all-time)</div>
             </div>
@@ -72,19 +80,21 @@
 
 <!-- ── Quick actions ────────────────────────────────────────────────────── -->
 <div class="mb-4 d-flex gap-2 flex-wrap">
-    <a asp-controller="Cache" asp-action="Set" class="btn btn-primary">+ Set Entry</a>
-    <a asp-controller="Cache" asp-action="Get" class="btn btn-outline-primary">Get Entry</a>
-    <a asp-controller="Cache" asp-action="RemoveByTag" class="btn btn-outline-danger">Remove by Tag</a>
+    <a asp-controller="Cache" asp-action="Set"          class="btn btn-primary">+ Set Entry</a>
+    <a asp-controller="Cache" asp-action="Get"          class="btn btn-outline-primary">Get Entry</a>
+    <a asp-controller="Cache" asp-action="RemoveByTag"  class="btn btn-outline-danger">Remove by Tag</a>
 </div>
 
 <!-- ── Active entries ───────────────────────────────────────────────────── -->
 <h5 class="mb-2">Active Cache Entries</h5>
 @if (!Model.Entries.Any())
 {
-    <div class="alert alert-light border text-center py-3 mb-4">
-        No active entries.
-        <a asp-controller="Cache" asp-action="Set">Set one</a> or
-        <a asp-controller="Cache" asp-action="Get">Get a key</a> to trigger the random factory.
+    <div class="card border-secondary mb-4">
+        <div class="card-body text-center py-3 text-muted">
+            No active entries.
+            <a asp-controller="Cache" asp-action="Set">Set one</a> or
+            <a asp-controller="Cache" asp-action="Get">Get a key</a> to trigger the random factory.
+        </div>
     </div>
 }
 else
@@ -111,11 +121,18 @@ else
                     <tr class="@(entry.IsExpired ? "expired-row" : "")">
                         <td><code class="small">@entry.Key</code></td>
                         <td style="max-width:220px">
-                            <button class="btn btn-sm btn-outline-secondary py-0 px-1 mb-1"
-                                    type="button" data-bs-toggle="collapse"
-                                    data-bs-target="#@collapseId">
-                                <small>View</small>
-                            </button>
+                            <div class="d-flex gap-1">
+                                <button class="btn btn-sm btn-outline-secondary py-0 px-1"
+                                        type="button" data-bs-toggle="collapse"
+                                        data-bs-target="#@collapseId">
+                                    <small>View</small>
+                                </button>
+                                <button class="btn btn-sm btn-outline-secondary py-0 px-1"
+                                        type="button"
+                                        onclick="copyPreText('@collapseId', this)">
+                                    <small>Copy</small>
+                                </button>
+                            </div>
                             <div class="collapse" id="@collapseId">
                                 <pre class="value-preview mb-0 mt-1 small">@entry.Value</pre>
                             </div>
@@ -136,7 +153,7 @@ else
                             }
                             else
                             {
-                                <span class="badge text-bg-light text-dark border">manual</span>
+                                <span class="badge text-bg-secondary">manual</span>
                             }
                         </td>
                         <td class="text-nowrap small">@entry.CreatedAt.ToLocalTime().ToString("HH:mm:ss")</td>
@@ -281,4 +298,34 @@ else
             </tbody>
         </table>
     </div>
+}
+
+@section Scripts {
+<script>
+// ── Copy value from a pre block ────────────────────────────────────────────
+function copyPreText(collapseId, btn) {
+    var pre = document.querySelector('#' + collapseId + ' pre');
+    if (!pre) return;
+    navigator.clipboard.writeText(pre.textContent).then(function () {
+        var orig = btn.innerHTML;
+        btn.innerHTML = '<small>Copied!</small>';
+        setTimeout(function () { btn.innerHTML = orig; }, 1500);
+    });
+}
+
+// ── Auto-refresh toggle ────────────────────────────────────────────────────
+var refreshTimer = null;
+var dot = document.getElementById('autoRefreshDot');
+
+document.getElementById('autoRefreshToggle').addEventListener('change', function () {
+    if (this.checked) {
+        dot.classList.remove('d-none');
+        refreshTimer = setInterval(function () { location.reload(); }, 5000);
+    } else {
+        dot.classList.add('d-none');
+        clearInterval(refreshTimer);
+        refreshTimer = null;
+    }
+});
+</script>
 }

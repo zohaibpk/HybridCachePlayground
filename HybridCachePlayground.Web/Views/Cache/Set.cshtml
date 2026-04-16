@@ -1,6 +1,8 @@
 @model HybridCachePlayground.Web.Models.CacheSetRequest
 @{
     ViewData["Title"] = "Set Cache Entry";
+    var recentKeys = ViewData["RecentKeys"] as List<string> ?? new();
+    var allTags    = ViewData["AllTags"]    as List<string> ?? new();
 }
 
 <h2 class="mb-4">Set Cache Entry</h2>
@@ -13,41 +15,84 @@
     <div class="col-md-7">
         <form asp-action="Set" method="post">
             @Html.AntiForgeryToken()
+
+            <!-- Key -->
             <div class="mb-3">
                 <label asp-for="Key" class="form-label fw-semibold">Cache Key</label>
-                <input asp-for="Key" class="form-control" placeholder="e.g. user:42" />
+                <input asp-for="Key" id="Key" class="form-control" placeholder="e.g. user:42" />
                 <span asp-validation-for="Key" class="text-danger small"></span>
+                @if (recentKeys.Any())
+                {
+                    <div class="mt-1">
+                        <small class="text-muted">Recent: </small>
+                        @foreach (var k in recentKeys)
+                        {
+                            <button type="button" class="btn btn-sm btn-outline-secondary chip-suggest"
+                                    data-fill-id="Key" data-fill-val="@k">@k</button>
+                        }
+                    </div>
+                }
             </div>
+
+            <!-- Value -->
             <div class="mb-3">
-                <label asp-for="Value" class="form-label fw-semibold">Value <span class="text-muted fw-normal">(any string or JSON)</span></label>
-                <textarea asp-for="Value" class="form-control font-monospace" rows="5"
-                          placeholder='e.g. {"name":"Alice","role":"admin"}'></textarea>
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                    <label asp-for="Value" class="form-label fw-semibold mb-0">
+                        Value <span class="text-muted fw-normal">(any string or JSON)</span>
+                    </label>
+                    <div class="d-flex align-items-center gap-2">
+                        <span id="factoryLabel" class="badge text-bg-secondary d-none"></span>
+                        <button type="button" id="btnGenerate" class="btn btn-sm btn-outline-secondary">
+                            &#x2728; Generate
+                        </button>
+                    </div>
+                </div>
+                <textarea asp-for="Value" id="Value" class="form-control font-monospace" rows="6"
+                          placeholder='{"name":"Alice","role":"admin"}'></textarea>
                 <span asp-validation-for="Value" class="text-danger small"></span>
+                <div class="form-text">
+                    Click <strong>Generate</strong> to fill with random factory data. Key is auto-filled if empty.
+                </div>
             </div>
+
+            <!-- Tags -->
             <div class="mb-3">
                 <label asp-for="Tags" class="form-label fw-semibold">
                     Tags <span class="text-muted fw-normal">(comma-separated)</span>
                 </label>
-                <input asp-for="Tags" class="form-control" placeholder="e.g. users, tenant-1, admin" />
+                <input asp-for="Tags" id="Tags" class="form-control" placeholder="e.g. users, tenant-1, admin" />
                 <div class="form-text">
                     Tags allow bulk invalidation via <em>Remove by Tag</em>.
-                    HybridCache propagates tag-based eviction across L1 and L2.
                 </div>
+                @if (allTags.Any())
+                {
+                    <div class="mt-1">
+                        <small class="text-muted">Known tags: </small>
+                        @foreach (var t in allTags)
+                        {
+                            <button type="button" class="btn btn-sm btn-outline-secondary chip-suggest chip-tag"
+                                    data-fill-id="Tags" data-fill-val="@t">@t</button>
+                        }
+                    </div>
+                }
             </div>
+
+            <!-- Expiration -->
             <div class="mb-4">
                 <label asp-for="ExpirationMinutes" class="form-label fw-semibold">Expiration (minutes)</label>
                 <input asp-for="ExpirationMinutes" type="number" class="form-control" min="1" max="1440" />
                 <span asp-validation-for="ExpirationMinutes" class="text-danger small"></span>
                 <div class="form-text">L1 (local) TTL = min(this, 2 min). L2 TTL = this value.</div>
             </div>
+
             <button type="submit" class="btn btn-primary">Store in Cache</button>
             <a asp-controller="Home" asp-action="Index" class="btn btn-link">Back to Dashboard</a>
         </form>
     </div>
 
     <div class="col-md-5">
-        <div class="card border-secondary">
-            <div class="card-header bg-secondary text-white small">API used</div>
+        <div class="card">
+            <div class="card-header bg-secondary small">API used</div>
             <div class="card-body">
                 <pre class="small mb-0"><code>await hybridCache.SetAsync(
     key,
@@ -66,4 +111,54 @@
 
 @section Scripts {
     @{await Html.RenderPartialAsync("_ValidationScriptsPartial");}
+    <script>
+    // ── Fill-chip: click populates an input field ──────────────────────────
+    document.querySelectorAll('[data-fill-id]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var inputId = btn.getAttribute('data-fill-id');
+            var val     = btn.getAttribute('data-fill-val');
+            var el      = document.getElementById(inputId);
+            if (!el) return;
+
+            if (btn.classList.contains('chip-tag')) {
+                // Append tag if not already present
+                var parts = el.value.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+                if (!parts.includes(val)) { parts.push(val); }
+                el.value = parts.join(', ');
+            } else {
+                el.value = val;
+            }
+        });
+    });
+
+    // ── Generate button ────────────────────────────────────────────────────
+    document.getElementById('btnGenerate').addEventListener('click', async function () {
+        var btn = this;
+        btn.disabled = true;
+        btn.textContent = 'Generating…';
+
+        try {
+            var resp = await fetch('/cache/generate-value');
+            if (!resp.ok) throw new Error('Request failed');
+            var data = await resp.json();
+
+            document.getElementById('Value').value = data.json;
+
+            var labelBadge = document.getElementById('factoryLabel');
+            labelBadge.textContent = data.label;
+            labelBadge.classList.remove('d-none');
+
+            // Auto-fill key if empty
+            var keyEl = document.getElementById('Key');
+            if (!keyEl.value) {
+                keyEl.value = data.label.toLowerCase() + '-' + Math.floor(Math.random() * 9000 + 1000);
+            }
+        } catch (e) {
+            console.error(e);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '&#x2728; Generate';
+        }
+    });
+    </script>
 }

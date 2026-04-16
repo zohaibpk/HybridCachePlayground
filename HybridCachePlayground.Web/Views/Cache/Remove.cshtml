@@ -1,6 +1,7 @@
 @model HybridCachePlayground.Web.Models.CacheRemoveRequest
 @{
     ViewData["Title"] = "Remove by Key";
+    var recentKeys = ViewData["RecentKeys"] as List<string> ?? new();
 }
 
 <h2 class="mb-4">Remove by Key</h2>
@@ -15,8 +16,19 @@
             @Html.AntiForgeryToken()
             <div class="mb-3">
                 <label asp-for="Key" class="form-label fw-semibold">Cache Key</label>
-                <input asp-for="Key" class="form-control" placeholder="e.g. user:42" />
+                <input asp-for="Key" id="Key" class="form-control" placeholder="e.g. user:42" />
                 <span asp-validation-for="Key" class="text-danger small"></span>
+                @if (recentKeys.Any())
+                {
+                    <div class="mt-1">
+                        <small class="text-muted">Recent: </small>
+                        @foreach (var k in recentKeys)
+                        {
+                            <button type="button" class="btn btn-sm btn-outline-secondary chip-suggest"
+                                    data-fill-id="Key" data-fill-val="@k">@k</button>
+                        }
+                    </div>
+                }
             </div>
             <button type="submit" class="btn btn-danger">Remove Entry</button>
             <a asp-controller="Home" asp-action="Index" class="btn btn-link">Back to Dashboard</a>
@@ -24,8 +36,8 @@
     </div>
 
     <div class="col-md-5">
-        <div class="card border-secondary">
-            <div class="card-header bg-secondary text-white small">API used</div>
+        <div class="card">
+            <div class="card-header bg-secondary small">API used</div>
             <div class="card-body">
                 <pre class="small mb-0"><code>await hybridCache.RemoveAsync(key);</code></pre>
             </div>
@@ -43,4 +55,11 @@
 
 @section Scripts {
     @{await Html.RenderPartialAsync("_ValidationScriptsPartial");}
+    <script>
+    document.querySelectorAll('[data-fill-id]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            document.getElementById(btn.getAttribute('data-fill-id')).value = btn.getAttribute('data-fill-val');
+        });
+    });
+    </script>
 }

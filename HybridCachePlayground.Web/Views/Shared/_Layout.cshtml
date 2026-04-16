@@ -1,24 +1,17 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" style="color-scheme: dark;">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>@ViewData["Title"] - HybridCache Playground</title>
     <link rel="stylesheet" href="~/lib/bootstrap/dist/css/bootstrap.min.css" />
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
-    <style>
-        .badge-tag { font-size: .75em; }
-        .hit-badge  { background-color: #198754; }
-        .miss-badge { background-color: #dc3545; }
-        .expired-row td { opacity: .55; text-decoration: line-through; }
-        pre.value-preview { max-height: 120px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; }
-    </style>
 </head>
 <body>
     <header>
-        <nav class="navbar navbar-expand-sm navbar-dark bg-dark border-bottom mb-3">
+        <nav class="navbar navbar-expand-sm navbar-dark bg-dark border-bottom border-secondary mb-3">
             <div class="container-fluid">
-                <a class="navbar-brand fw-bold" asp-controller="Home" asp-action="Index">
+                <a class="navbar-brand fw-bold text-white" asp-controller="Home" asp-action="Index">
                     HybridCache Playground
                 </a>
                 <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target=".navbar-collapse">
@@ -42,7 +35,7 @@
                             <a class="nav-link" asp-controller="Cache" asp-action="RemoveByTag">Remove by Tag</a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link text-warning fw-semibold" asp-controller="Cache" asp-action="Stampede">⚡ Stampede Test</a>
+                            <a class="nav-link text-warning fw-semibold" asp-controller="Cache" asp-action="Stampede">&#9889; Stampede Test</a>
                         </li>
                     </ul>
                 </div>
@@ -61,14 +54,14 @@
                 };
                 <div class="alert @alertClass alert-dismissible fade show" role="alert">
                     @msg
-                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="alert"></button>
                 </div>
             }
             @RenderBody()
         </main>
     </div>
 
-    <footer class="border-top footer text-muted mt-4">
+    <footer class="border-top footer mt-4">
         <div class="container py-2 small">
             HybridCache Playground &mdash; Microsoft.Extensions.Caching.Hybrid
         </div>
