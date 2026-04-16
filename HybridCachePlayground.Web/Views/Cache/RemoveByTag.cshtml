@@ -2,6 +2,13 @@
 @{
     ViewData["Title"] = "Remove by Tag";
     var allTags = ViewData["AllTags"] as List<string> ?? new();
+
+    // Derive wildcard patterns from known tags: "factory-generated" → "factory-*", "users" → "users*"
+    var wildcardPatterns = allTags
+        .Select(t => t.Contains('-') ? t.Split('-')[0] + "-*" : t + "*")
+        .Distinct()
+        .OrderBy(p => p)
+        .ToList();
 }
 
 <h2 class="mb-4">Remove by Tag</h2>
@@ -46,41 +53,44 @@
 
         <!-- Wildcard match -->
         <div class="card border-warning">
-            <div class="card-header bg-warning fw-semibold">Wildcard Tag Eviction</div>
+            <div class="card-header bg-warning fw-semibold">
+                Wildcard Tag Eviction <small class="fw-normal ms-1">(<code>*</code>)</small>
+            </div>
             <div class="card-body">
-                <p class="small text-muted mb-3">
-                    Use <code>*</code> to match any sequence of characters, <code>?</code> to match a single character.
-                    <br />Examples: <code>factory-*</code> &nbsp;·&nbsp; <code>tenant-?</code> &nbsp;·&nbsp; <code>*-generated</code>
-                </p>
-                <form asp-action="RemoveByTagWildcard" method="post" id="wildcardForm">
+                @if (wildcardPatterns.Any())
+                {
+                    <p class="small text-muted mb-2">
+                        Patterns auto-derived from known tags. Click one to evict all matching entries immediately.
+                    </p>
+                    <div class="d-flex flex-wrap gap-2 mb-3">
+                        @foreach (var pattern in wildcardPatterns)
+                        {
+                            <form asp-action="RemoveByTagWildcard" method="post" class="d-inline">
+                                @Html.AntiForgeryToken()
+                                <input type="hidden" name="wildcardPattern" value="@pattern" />
+                                <button type="submit" class="btn btn-warning text-dark fw-semibold">
+                                    @pattern
+                                </button>
+                            </form>
+                        }
+                    </div>
+                    <hr style="border-color:#3a3d48;" />
+                }
+                else
+                {
+                    <p class="small text-muted mb-3">No tags in registry yet. Set some entries first.</p>
+                }
+
+                <!-- Remove All -->
+                <form asp-action="RemoveByTagWildcard" method="post" class="d-inline"
+                      onsubmit="return confirm('Remove ALL cached entries? This cannot be undone.');">
                     @Html.AntiForgeryToken()
-                    <div class="mb-3">
-                        <label for="wildcardPattern" class="form-label fw-semibold">Pattern</label>
-                        <div class="input-group">
-                            <input type="text" id="wildcardPattern" name="wildcardPattern"
-                                   class="form-control font-monospace"
-                                   placeholder="e.g. factory-*" autocomplete="off" />
-                            <button type="button" class="btn btn-outline-secondary" id="btnPreview">
-                                Preview
-                            </button>
-                        </div>
-                        <div class="form-text">
-                            Click <strong>Preview</strong> to see which tags would be matched before evicting.
-                        </div>
-                    </div>
-
-                    <!-- Preview result -->
-                    <div id="previewArea" class="d-none mb-3">
-                        <div class="small fw-semibold mb-1 text-muted">Matching tags:</div>
-                        <div id="previewTags" class="mb-2"></div>
-                        <div id="previewNone" class="text-muted small d-none">No tags match this pattern.</div>
-                    </div>
-
-                    <button type="submit" class="btn btn-warning text-dark fw-semibold" id="btnWildcardEvict" disabled>
-                        Evict All Matching Tags
+                    <input type="hidden" name="wildcardPattern" value="*" />
+                    <button type="submit" class="btn btn-danger">
+                        &#128465; Remove All (<code>*</code>)
                     </button>
-                    <small id="matchCount" class="text-muted ms-2 d-none"></small>
                 </form>
+                <div class="form-text mt-1">Matches every tag in the registry — use with care.</div>
             </div>
         </div>
 
@@ -108,7 +118,8 @@
                     <li><code>RemoveByTagAsync</code> is called once per matched tag.</li>
                 </ol>
                 <p class="mt-2 mb-0 text-muted">
-                    Only tags seen in this session (from the Tag Registry) are matched.
+                    Wildcard buttons are auto-derived from the Tag Registry using the
+                    prefix before the first <code>-</code>.
                 </p>
             </div>
         </div>
@@ -128,64 +139,10 @@
 @section Scripts {
     @{await Html.RenderPartialAsync("_ValidationScriptsPartial");}
     <script>
-    // ── Exact-tag chip fill ────────────────────────────────────────────────
     document.querySelectorAll('[data-fill-id]').forEach(function (btn) {
         btn.addEventListener('click', function () {
             document.getElementById(btn.getAttribute('data-fill-id')).value = btn.getAttribute('data-fill-val');
         });
-    });
-
-    // ── Wildcard preview ──────────────────────────────────────────────────
-    var previewUrl = '@Url.Action("WildcardTagPreview", "Cache")';
-    var previewArea   = document.getElementById('previewArea');
-    var previewTags   = document.getElementById('previewTags');
-    var previewNone   = document.getElementById('previewNone');
-    var evictBtn      = document.getElementById('btnWildcardEvict');
-    var matchCount    = document.getElementById('matchCount');
-
-    document.getElementById('btnPreview').addEventListener('click', async function () {
-        var pattern = document.getElementById('wildcardPattern').value.trim();
-        if (!pattern) return;
-
-        this.disabled = true;
-        this.textContent = '…';
-
-        try {
-            var resp = await fetch(previewUrl + '?pattern=' + encodeURIComponent(pattern));
-            var data = await resp.json();
-
-            previewArea.classList.remove('d-none');
-            previewTags.innerHTML = '';
-
-            if (data.matches && data.matches.length > 0) {
-                data.matches.forEach(function (tag) {
-                    var span = document.createElement('span');
-                    span.className = 'badge text-bg-warning me-1 mb-1';
-                    span.textContent = tag;
-                    previewTags.appendChild(span);
-                });
-                previewNone.classList.add('d-none');
-                evictBtn.disabled = false;
-                matchCount.classList.remove('d-none');
-                matchCount.textContent = data.matches.length + ' tag(s) matched';
-            } else {
-                previewNone.classList.remove('d-none');
-                evictBtn.disabled = true;
-                matchCount.classList.add('d-none');
-            }
-        } catch (e) {
-            console.error(e);
-        } finally {
-            this.disabled = false;
-            this.textContent = 'Preview';
-        }
-    });
-
-    // Re-disable evict button if user changes the pattern after previewing
-    document.getElementById('wildcardPattern').addEventListener('input', function () {
-        evictBtn.disabled = true;
-        previewArea.classList.add('d-none');
-        matchCount.classList.add('d-none');
     });
     </script>
 }

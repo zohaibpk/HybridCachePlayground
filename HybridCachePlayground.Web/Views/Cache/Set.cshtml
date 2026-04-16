@@ -138,7 +138,7 @@
         btn.textContent = 'Generating…';
 
         try {
-            var resp = await fetch('/cache/generate-value');
+            var resp = await fetch('@Url.Action("GenerateValue", "Cache")');
             if (!resp.ok) throw new Error('Request failed');
             var data = await resp.json();
 

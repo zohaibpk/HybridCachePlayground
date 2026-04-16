@@ -30,6 +30,33 @@ public class CacheController : Controller
             .Select(t => t.Tag)
             .ToList();
 
+    // ─── Bulk Set ────────────────────────────────────────────────────────────
+
+    [HttpGet]
+    public IActionResult BulkSet()
+    {
+        InjectAllTags();
+        return View(new BulkSetRequest());
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> BulkSet(BulkSetRequest model)
+    {
+        if (!ModelState.IsValid)
+        {
+            InjectAllTags();
+            return View(model);
+        }
+
+        var result = await _cacheService.BulkSetAsync(
+            model.KeyPrefix, model.Count, model.ParsedTags, model.ExpirationMinutes);
+
+        ViewData["Result"] = result;
+        InjectAllTags();
+        return View(model);
+    }
+
     // ─── Set ─────────────────────────────────────────────────────────────────
 
     [HttpGet]
@@ -156,18 +183,6 @@ public class CacheController : Controller
         var result = await _cacheService.RunStampedeTestAsync(model.Key, model.Concurrency, model.ForceEvict);
         ViewData["Result"] = result;
         return View(model);
-    }
-
-    // ─── Wildcard tag preview (AJAX) ─────────────────────────────────────────
-
-    [HttpGet]
-    public IActionResult WildcardTagPreview(string pattern)
-    {
-        if (string.IsNullOrWhiteSpace(pattern))
-            return Json(new { matches = Array.Empty<string>() });
-
-        var matches = _cacheService.GetMatchingTags(pattern);
-        return Json(new { matches });
     }
 
     // ─── Remove by tag wildcard ───────────────────────────────────────────────

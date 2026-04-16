@@ -6,6 +6,8 @@ public interface ICachePlaygroundService
 {
     Task SetAsync(string key, string value, IEnumerable<string> tags, int expirationMinutes, CancellationToken ct = default);
 
+    Task<BulkSetResult> BulkSetAsync(string keyPrefix, int count, IEnumerable<string> tags, int expirationMinutes, CancellationToken ct = default);
+
     Task<CacheGetResult> GetOrCreateAsync(string key, CancellationToken ct = default);
 
     Task<StampedeResult> RunStampedeTestAsync(string key, int concurrency, bool forceEvict, CancellationToken ct = default);
@@ -20,8 +22,6 @@ public interface ICachePlaygroundService
     /// </summary>
     Task<(int RemovedEntries, IReadOnlyList<string> MatchedTags)> RemoveByTagWildcardAsync(string pattern, CancellationToken ct = default);
 
-    /// <summary>Returns all known tags that match the given glob pattern (preview, no removal).</summary>
-    IReadOnlyList<string> GetMatchingTags(string pattern);
 
     IReadOnlyList<CacheEntryMetadata> GetAllEntries();
 

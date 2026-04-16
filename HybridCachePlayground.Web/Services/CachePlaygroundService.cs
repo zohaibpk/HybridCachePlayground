@@ -71,6 +71,39 @@ public sealed class CachePlaygroundService : ICachePlaygroundService
         RegisterTags(tagList, key, now);
     }
 
+    // ─── Bulk Set ────────────────────────────────────────────────────────────
+
+    public async Task<BulkSetResult> BulkSetAsync(
+        string keyPrefix, int count, IEnumerable<string> tags, int expirationMinutes,
+        CancellationToken ct = default)
+    {
+        var baseTags  = NormalizeTags(tags);
+        var result    = new BulkSetResult { KeyPrefix = keyPrefix, Requested = count };
+        var sw        = System.Diagnostics.Stopwatch.StartNew();
+
+        for (var i = 1; i <= count; i++)
+        {
+            var key              = $"{keyPrefix}-{i}";
+            var (label, json)    = RandomDataFactory.Generate();
+            var entryTags        = new List<string>(baseTags) { NormalizeTag(label) };
+
+            await SetAsync(key, json, entryTags, expirationMinutes, ct);
+
+            result.Entries.Add(new BulkSetResultEntry
+            {
+                Key          = key,
+                Label        = label,
+                ValuePreview = json.Length > 120 ? json[..120] + "…" : json,
+                Tags         = entryTags
+            });
+        }
+
+        sw.Stop();
+        result.Added     = count;
+        result.ElapsedMs = sw.ElapsedMilliseconds;
+        return result;
+    }
+
     // ─── Get / GetOrCreate ────────────────────────────────────────────────────
 
     public async Task<CacheGetResult> GetOrCreateAsync(string key, CancellationToken ct = default)
