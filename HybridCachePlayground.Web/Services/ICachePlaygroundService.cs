@@ -14,6 +14,15 @@ public interface ICachePlaygroundService
 
     Task<int> RemoveByTagAsync(string tag, CancellationToken ct = default);
 
+    /// <summary>
+    /// Removes all entries whose tags match a glob pattern (* = any chars, ? = single char).
+    /// Returns the number of entries removed and the list of matched tags.
+    /// </summary>
+    Task<(int RemovedEntries, IReadOnlyList<string> MatchedTags)> RemoveByTagWildcardAsync(string pattern, CancellationToken ct = default);
+
+    /// <summary>Returns all known tags that match the given glob pattern (preview, no removal).</summary>
+    IReadOnlyList<string> GetMatchingTags(string pattern);
+
     IReadOnlyList<CacheEntryMetadata> GetAllEntries();
 
     CacheStats GetStats();

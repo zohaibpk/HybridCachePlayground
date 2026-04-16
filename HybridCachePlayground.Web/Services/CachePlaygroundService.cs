@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text.RegularExpressions;
 using HybridCachePlayground.Web.Models;
 using Microsoft.Extensions.Caching.Hybrid;
 
@@ -219,6 +220,36 @@ public sealed class CachePlaygroundService : ICachePlaygroundService
             ElapsedMs = sw.ElapsedMilliseconds,
             SampleValue = capturedValue ?? results.FirstOrDefault(v => v is not null)
         };
+    }
+
+    // ─── Wildcard helpers ────────────────────────────────────────────────────
+
+    /// <summary>Converts a glob pattern (* / ?) to a compiled Regex, case-insensitive.</summary>
+    private static Regex GlobToRegex(string pattern)
+    {
+        var escaped = Regex.Escape(pattern.Trim().ToLowerInvariant())
+                           .Replace("\\*", ".*")
+                           .Replace("\\?", ".");
+        return new Regex($"^{escaped}$", RegexOptions.Compiled);
+    }
+
+    public IReadOnlyList<string> GetMatchingTags(string pattern)
+    {
+        if (string.IsNullOrWhiteSpace(pattern)) return [];
+        var regex = GlobToRegex(pattern);
+        return _tagRegistry.Keys.Where(t => regex.IsMatch(t)).OrderBy(t => t).ToList();
+    }
+
+    public async Task<(int RemovedEntries, IReadOnlyList<string> MatchedTags)> RemoveByTagWildcardAsync(
+        string pattern, CancellationToken ct = default)
+    {
+        var matchedTags = GetMatchingTags(pattern);
+        var totalRemoved = 0;
+
+        foreach (var tag in matchedTags)
+            totalRemoved += await RemoveByTagAsync(tag, ct);
+
+        return (totalRemoved, matchedTags);
     }
 
     // ─── Remove ───────────────────────────────────────────────────────────────

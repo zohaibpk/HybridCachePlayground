@@ -10,50 +10,115 @@
     <code>HybridCache.RemoveByTagAsync(tag)</code> — the key feature of tag-based invalidation.
 </p>
 
-<div class="row">
+<div class="row g-4">
+    <!-- ── Left column ── -->
     <div class="col-md-7">
-        <form asp-action="RemoveByTag" method="post">
-            @Html.AntiForgeryToken()
-            <div class="mb-3">
-                <label asp-for="Tag" class="form-label fw-semibold">Tag</label>
-                <input asp-for="Tag" id="Tag" class="form-control" placeholder="e.g. users" />
-                <span asp-validation-for="Tag" class="text-danger small"></span>
-                <div class="form-text">
-                    All entries that were stored with this tag will be evicted
-                    from both L1 and L2 simultaneously.
-                </div>
-                @if (allTags.Any())
-                {
-                    <div class="mt-2">
-                        <small class="text-muted">Known tags: </small>
-                        @foreach (var t in allTags)
+
+        <!-- Exact match -->
+        <div class="card mb-4">
+            <div class="card-header fw-semibold">Exact Tag Match</div>
+            <div class="card-body">
+                <form asp-action="RemoveByTag" method="post">
+                    @Html.AntiForgeryToken()
+                    <div class="mb-3">
+                        <label asp-for="Tag" class="form-label fw-semibold">Tag</label>
+                        <input asp-for="Tag" id="Tag" class="form-control" placeholder="e.g. users" />
+                        <span asp-validation-for="Tag" class="text-danger small"></span>
+                        <div class="form-text">
+                            All entries stored with this exact tag will be evicted from both L1 and L2.
+                        </div>
+                        @if (allTags.Any())
                         {
-                            <button type="button" class="btn btn-sm btn-outline-danger chip-suggest"
-                                    data-fill-id="Tag" data-fill-val="@t">@t</button>
+                            <div class="mt-2">
+                                <small class="text-muted">Known tags: </small>
+                                @foreach (var t in allTags)
+                                {
+                                    <button type="button" class="btn btn-sm btn-outline-danger chip-suggest"
+                                            data-fill-id="Tag" data-fill-val="@t">@t</button>
+                                }
+                            </div>
                         }
                     </div>
-                }
+                    <button type="submit" class="btn btn-danger">Evict by Tag</button>
+                </form>
             </div>
-            <button type="submit" class="btn btn-danger">Evict by Tag</button>
-            <a asp-controller="Home" asp-action="Index" class="btn btn-link">Back to Dashboard</a>
-        </form>
+        </div>
+
+        <!-- Wildcard match -->
+        <div class="card border-warning">
+            <div class="card-header bg-warning fw-semibold">Wildcard Tag Eviction</div>
+            <div class="card-body">
+                <p class="small text-muted mb-3">
+                    Use <code>*</code> to match any sequence of characters, <code>?</code> to match a single character.
+                    <br />Examples: <code>factory-*</code> &nbsp;·&nbsp; <code>tenant-?</code> &nbsp;·&nbsp; <code>*-generated</code>
+                </p>
+                <form asp-action="RemoveByTagWildcard" method="post" id="wildcardForm">
+                    @Html.AntiForgeryToken()
+                    <div class="mb-3">
+                        <label for="wildcardPattern" class="form-label fw-semibold">Pattern</label>
+                        <div class="input-group">
+                            <input type="text" id="wildcardPattern" name="wildcardPattern"
+                                   class="form-control font-monospace"
+                                   placeholder="e.g. factory-*" autocomplete="off" />
+                            <button type="button" class="btn btn-outline-secondary" id="btnPreview">
+                                Preview
+                            </button>
+                        </div>
+                        <div class="form-text">
+                            Click <strong>Preview</strong> to see which tags would be matched before evicting.
+                        </div>
+                    </div>
+
+                    <!-- Preview result -->
+                    <div id="previewArea" class="d-none mb-3">
+                        <div class="small fw-semibold mb-1 text-muted">Matching tags:</div>
+                        <div id="previewTags" class="mb-2"></div>
+                        <div id="previewNone" class="text-muted small d-none">No tags match this pattern.</div>
+                    </div>
+
+                    <button type="submit" class="btn btn-warning text-dark fw-semibold" id="btnWildcardEvict" disabled>
+                        Evict All Matching Tags
+                    </button>
+                    <small id="matchCount" class="text-muted ms-2 d-none"></small>
+                </form>
+            </div>
+        </div>
+
+        <a asp-controller="Home" asp-action="Index" class="btn btn-link mt-3">Back to Dashboard</a>
     </div>
 
+    <!-- ── Right column ── -->
     <div class="col-md-5">
         <div class="card">
-            <div class="card-header bg-secondary small">API used</div>
+            <div class="card-header bg-secondary small">Exact — API used</div>
             <div class="card-body">
                 <pre class="small mb-0"><code>await hybridCache.RemoveByTagAsync(tag);</code></pre>
+            </div>
+        </div>
+        <div class="card border-warning mt-3">
+            <div class="card-header bg-warning small">Wildcard — how it works</div>
+            <div class="card-body small">
+                <p>
+                    HybridCache does not natively support wildcard tag removal.
+                    This feature is implemented in the service layer:
+                </p>
+                <ol class="mb-0">
+                    <li>The glob pattern is converted to a Regex.</li>
+                    <li>All known tags are scanned for matches.</li>
+                    <li><code>RemoveByTagAsync</code> is called once per matched tag.</li>
+                </ol>
+                <p class="mt-2 mb-0 text-muted">
+                    Only tags seen in this session (from the Tag Registry) are matched.
+                </p>
             </div>
         </div>
         <div class="card border-info mt-3">
             <div class="card-header bg-info small">Tag invalidation pattern</div>
             <div class="card-body small">
-                <p>Tags are great for group invalidation:</p>
                 <ul class="mb-0">
                     <li>Tag <code>tenant-5</code> → evict all data for tenant 5</li>
                     <li>Tag <code>users</code> → evict all user-related entries</li>
-                    <li>Tag <code>catalog</code> → evict after a product update</li>
+                    <li>Tag <code>factory-*</code> → evict all factory-generated entries</li>
                 </ul>
             </div>
         </div>
@@ -63,10 +128,64 @@
 @section Scripts {
     @{await Html.RenderPartialAsync("_ValidationScriptsPartial");}
     <script>
+    // ── Exact-tag chip fill ────────────────────────────────────────────────
     document.querySelectorAll('[data-fill-id]').forEach(function (btn) {
         btn.addEventListener('click', function () {
             document.getElementById(btn.getAttribute('data-fill-id')).value = btn.getAttribute('data-fill-val');
         });
+    });
+
+    // ── Wildcard preview ──────────────────────────────────────────────────
+    var previewUrl = '@Url.Action("WildcardTagPreview", "Cache")';
+    var previewArea   = document.getElementById('previewArea');
+    var previewTags   = document.getElementById('previewTags');
+    var previewNone   = document.getElementById('previewNone');
+    var evictBtn      = document.getElementById('btnWildcardEvict');
+    var matchCount    = document.getElementById('matchCount');
+
+    document.getElementById('btnPreview').addEventListener('click', async function () {
+        var pattern = document.getElementById('wildcardPattern').value.trim();
+        if (!pattern) return;
+
+        this.disabled = true;
+        this.textContent = '…';
+
+        try {
+            var resp = await fetch(previewUrl + '?pattern=' + encodeURIComponent(pattern));
+            var data = await resp.json();
+
+            previewArea.classList.remove('d-none');
+            previewTags.innerHTML = '';
+
+            if (data.matches && data.matches.length > 0) {
+                data.matches.forEach(function (tag) {
+                    var span = document.createElement('span');
+                    span.className = 'badge text-bg-warning me-1 mb-1';
+                    span.textContent = tag;
+                    previewTags.appendChild(span);
+                });
+                previewNone.classList.add('d-none');
+                evictBtn.disabled = false;
+                matchCount.classList.remove('d-none');
+                matchCount.textContent = data.matches.length + ' tag(s) matched';
+            } else {
+                previewNone.classList.remove('d-none');
+                evictBtn.disabled = true;
+                matchCount.classList.add('d-none');
+            }
+        } catch (e) {
+            console.error(e);
+        } finally {
+            this.disabled = false;
+            this.textContent = 'Preview';
+        }
+    });
+
+    // Re-disable evict button if user changes the pattern after previewing
+    document.getElementById('wildcardPattern').addEventListener('input', function () {
+        evictBtn.disabled = true;
+        previewArea.classList.add('d-none');
+        matchCount.classList.add('d-none');
     });
     </script>
 }

@@ -158,6 +158,48 @@ public class CacheController : Controller
         return View(model);
     }
 
+    // ─── Wildcard tag preview (AJAX) ─────────────────────────────────────────
+
+    [HttpGet]
+    public IActionResult WildcardTagPreview(string pattern)
+    {
+        if (string.IsNullOrWhiteSpace(pattern))
+            return Json(new { matches = Array.Empty<string>() });
+
+        var matches = _cacheService.GetMatchingTags(pattern);
+        return Json(new { matches });
+    }
+
+    // ─── Remove by tag wildcard ───────────────────────────────────────────────
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> RemoveByTagWildcard(string wildcardPattern)
+    {
+        if (string.IsNullOrWhiteSpace(wildcardPattern))
+        {
+            TempData["Message"] = "Pattern cannot be empty.";
+            TempData["MessageType"] = "warning";
+            return RedirectToAction(nameof(RemoveByTag));
+        }
+
+        var (removed, matchedTags) = await _cacheService.RemoveByTagWildcardAsync(wildcardPattern);
+
+        if (matchedTags.Count == 0)
+        {
+            TempData["Message"] = $"No tags matched the pattern '{wildcardPattern}'.";
+            TempData["MessageType"] = "warning";
+        }
+        else
+        {
+            TempData["Message"] = $"Wildcard '{wildcardPattern}' matched {matchedTags.Count} tag(s) "
+                + $"({string.Join(", ", matchedTags)}) and removed {removed} entry/entries.";
+            TempData["MessageType"] = removed > 0 ? "success" : "warning";
+        }
+
+        return RedirectToAction(nameof(RemoveByTag));
+    }
+
     // ─── Generate Value (AJAX) ────────────────────────────────────────────────
 
     [HttpGet]
