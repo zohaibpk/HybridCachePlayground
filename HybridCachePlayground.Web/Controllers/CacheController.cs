@@ -7,11 +7,16 @@ namespace HybridCachePlayground.Web.Controllers;
 public class CacheController : Controller
 {
     private readonly ICachePlaygroundService _cacheService;
+    private readonly ILogger<CacheController> _logger;
     private readonly int _stampedeMax;
 
-    public CacheController(ICachePlaygroundService cacheService, IConfiguration config)
+    public CacheController(
+        ICachePlaygroundService cacheService,
+        IConfiguration config,
+        ILogger<CacheController> logger)
     {
         _cacheService = cacheService;
+        _logger = logger;
         _stampedeMax = config.GetValue("HybridCache:StampedeMaxConcurrency", 200);
     }
 
@@ -49,6 +54,10 @@ public class CacheController : Controller
             return View(model);
         }
 
+        _logger.LogInformation(
+            "Bulk Add requested | Prefix: {KeyPrefix} | Count: {Count} | TTL: {Ttl}m",
+            model.KeyPrefix, model.Count, model.ExpirationMinutes);
+
         var result = await _cacheService.BulkSetAsync(
             model.KeyPrefix, model.Count, model.ParsedTags, model.ExpirationMinutes);
 
@@ -78,6 +87,10 @@ public class CacheController : Controller
             return View(model);
         }
 
+        _logger.LogInformation(
+            "Set requested | Key: {Key} | Tags: [{Tags}] | TTL: {Ttl}m",
+            model.Key, string.Join(", ", model.ParsedTags), model.ExpirationMinutes);
+
         await _cacheService.SetAsync(model.Key, model.Value, model.ParsedTags, model.ExpirationMinutes);
 
         TempData["Message"] = $"Entry '{model.Key}' stored successfully with {model.ParsedTags.Count} tag(s).";
@@ -104,6 +117,8 @@ public class CacheController : Controller
             return View(model);
         }
 
+        _logger.LogInformation("Get requested | Key: {Key}", model.Key);
+
         var result = await _cacheService.GetOrCreateAsync(model.Key);
         ViewData["Result"] = result;
         InjectRecentKeys();
@@ -125,6 +140,8 @@ public class CacheController : Controller
     {
         if (!ModelState.IsValid)
             return View(model);
+
+        _logger.LogInformation("Remove by key requested | Key: {Key}", model.Key);
 
         await _cacheService.RemoveAsync(model.Key);
 
@@ -149,10 +166,44 @@ public class CacheController : Controller
         if (!ModelState.IsValid)
             return View(model);
 
+        _logger.LogInformation("Remove by tag requested | Tag: {Tag}", model.Tag);
+
         var count = await _cacheService.RemoveByTagAsync(model.Tag);
 
         TempData["Message"] = $"Removed {count} tracked entry/entries with tag '{model.Tag}'.";
         TempData["MessageType"] = count > 0 ? "success" : "warning";
+        return RedirectToAction(nameof(RemoveByTag));
+    }
+
+    // ─── Remove by tag wildcard ───────────────────────────────────────────────
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> RemoveByTagWildcard(string wildcardPattern)
+    {
+        if (string.IsNullOrWhiteSpace(wildcardPattern))
+        {
+            TempData["Message"] = "Pattern cannot be empty.";
+            TempData["MessageType"] = "warning";
+            return RedirectToAction(nameof(RemoveByTag));
+        }
+
+        _logger.LogInformation("Remove by wildcard requested | Pattern: {Pattern}", wildcardPattern);
+
+        var (removed, matchedTags) = await _cacheService.RemoveByTagWildcardAsync(wildcardPattern);
+
+        if (matchedTags.Count == 0)
+        {
+            TempData["Message"] = $"No tags matched the pattern '{wildcardPattern}'.";
+            TempData["MessageType"] = "warning";
+        }
+        else
+        {
+            TempData["Message"] = $"Wildcard '{wildcardPattern}' matched {matchedTags.Count} tag(s) "
+                + $"({string.Join(", ", matchedTags)}) and removed {removed} entry/entries.";
+            TempData["MessageType"] = removed > 0 ? "success" : "warning";
+        }
+
         return RedirectToAction(nameof(RemoveByTag));
     }
 
@@ -180,39 +231,13 @@ public class CacheController : Controller
         if (!ModelState.IsValid)
             return View(model);
 
+        _logger.LogInformation(
+            "Stampede test requested | Key: {Key} | Concurrency: {Concurrency} | ForceEvict: {ForceEvict}",
+            model.Key, model.Concurrency, model.ForceEvict);
+
         var result = await _cacheService.RunStampedeTestAsync(model.Key, model.Concurrency, model.ForceEvict);
         ViewData["Result"] = result;
         return View(model);
-    }
-
-    // ─── Remove by tag wildcard ───────────────────────────────────────────────
-
-    [HttpPost]
-    [ValidateAntiForgeryToken]
-    public async Task<IActionResult> RemoveByTagWildcard(string wildcardPattern)
-    {
-        if (string.IsNullOrWhiteSpace(wildcardPattern))
-        {
-            TempData["Message"] = "Pattern cannot be empty.";
-            TempData["MessageType"] = "warning";
-            return RedirectToAction(nameof(RemoveByTag));
-        }
-
-        var (removed, matchedTags) = await _cacheService.RemoveByTagWildcardAsync(wildcardPattern);
-
-        if (matchedTags.Count == 0)
-        {
-            TempData["Message"] = $"No tags matched the pattern '{wildcardPattern}'.";
-            TempData["MessageType"] = "warning";
-        }
-        else
-        {
-            TempData["Message"] = $"Wildcard '{wildcardPattern}' matched {matchedTags.Count} tag(s) "
-                + $"({string.Join(", ", matchedTags)}) and removed {removed} entry/entries.";
-            TempData["MessageType"] = removed > 0 ? "success" : "warning";
-        }
-
-        return RedirectToAction(nameof(RemoveByTag));
     }
 
     // ─── Generate Value (AJAX) ────────────────────────────────────────────────
@@ -221,6 +246,7 @@ public class CacheController : Controller
     public IActionResult GenerateValue()
     {
         var (label, json) = RandomDataFactory.Generate();
+        _logger.LogDebug("GenerateValue called | Label: {Label}", label);
         return Json(new { label, json });
     }
 }

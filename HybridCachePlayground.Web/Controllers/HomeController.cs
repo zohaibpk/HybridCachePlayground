@@ -8,10 +8,12 @@ namespace HybridCachePlayground.Web.Controllers;
 public class HomeController : Controller
 {
     private readonly ICachePlaygroundService _cacheService;
+    private readonly ILogger<HomeController> _logger;
 
-    public HomeController(ICachePlaygroundService cacheService)
+    public HomeController(ICachePlaygroundService cacheService, ILogger<HomeController> logger)
     {
         _cacheService = cacheService;
+        _logger = logger;
     }
 
     public IActionResult Index()
@@ -23,6 +25,11 @@ public class HomeController : Controller
             KeyRegistry = _cacheService.GetKeyRegistry().ToList(),
             TagRegistry = _cacheService.GetTagRegistry().ToList()
         };
+
+        _logger.LogDebug(
+            "Dashboard loaded | ActiveEntries: {Active} | Hits: {Hits} | Misses: {Misses} | HitRatio: {Ratio}%",
+            vm.Stats.ActiveEntries, vm.Stats.Hits, vm.Stats.Misses, vm.Stats.HitRatio);
+
         return View(vm);
     }
 
@@ -31,7 +38,10 @@ public class HomeController : Controller
     public async Task<IActionResult> QuickRemove(string key)
     {
         if (!string.IsNullOrWhiteSpace(key))
+        {
+            _logger.LogInformation("Quick remove | Key: {Key}", key);
             await _cacheService.RemoveAsync(key);
+        }
 
         TempData["Message"] = $"Entry '{key}' removed.";
         TempData["MessageType"] = "success";

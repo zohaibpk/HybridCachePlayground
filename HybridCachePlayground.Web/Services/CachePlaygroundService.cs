@@ -2,12 +2,14 @@ using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
 using HybridCachePlayground.Web.Models;
 using Microsoft.Extensions.Caching.Hybrid;
+using Microsoft.Extensions.Logging;
 
 namespace HybridCachePlayground.Web.Services;
 
 public sealed class CachePlaygroundService : ICachePlaygroundService
 {
     private readonly HybridCache _cache;
+    private readonly ILogger<CachePlaygroundService> _logger;
     private readonly int _defaultTtlMinutes;
     private readonly int _defaultLocalTtlMinutes;
 
@@ -22,19 +24,23 @@ public sealed class CachePlaygroundService : ICachePlaygroundService
     private long _misses;
     private long _factoryInvocations;
 
-    public CachePlaygroundService(HybridCache cache, IConfiguration configuration)
+    public CachePlaygroundService(
+        HybridCache cache,
+        IConfiguration configuration,
+        ILogger<CachePlaygroundService> logger)
     {
         _cache = cache;
+        _logger = logger;
         _defaultTtlMinutes = configuration.GetValue("HybridCache:DefaultExpirationMinutes", 5);
         _defaultLocalTtlMinutes = configuration.GetValue("HybridCache:LocalCacheExpirationMinutes", 2);
+
+        _logger.LogInformation(
+            "CachePlaygroundService initialised | DefaultTTL: {DefaultTtl}m | LocalTTL: {LocalTtl}m",
+            _defaultTtlMinutes, _defaultLocalTtlMinutes);
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
 
-    /// <summary>
-    /// Tags are normalized to lowercase-trimmed on every write so all
-    /// comparisons can use ordinal exact-match — no repeated OrdinalIgnoreCase.
-    /// </summary>
     private static string NormalizeTag(string tag) => tag.Trim().ToLowerInvariant();
 
     private static List<string> NormalizeTags(IEnumerable<string> tags) =>
@@ -49,9 +55,14 @@ public sealed class CachePlaygroundService : ICachePlaygroundService
 
     // ─── Set ─────────────────────────────────────────────────────────────────
 
-    public async Task SetAsync(string key, string value, IEnumerable<string> tags, int expirationMinutes, CancellationToken ct = default)
+    public async Task SetAsync(string key, string value, IEnumerable<string> tags,
+        int expirationMinutes, CancellationToken ct = default)
     {
         var tagList = NormalizeTags(tags);
+
+        _logger.LogInformation(
+            "Cache SET {Key} | TTL: {Ttl}m | Tags: [{Tags}]",
+            key, expirationMinutes, string.Join(", ", tagList));
 
         await _cache.SetAsync(key, value, MakeOptions(expirationMinutes), tagList, ct);
 
@@ -77,15 +88,19 @@ public sealed class CachePlaygroundService : ICachePlaygroundService
         string keyPrefix, int count, IEnumerable<string> tags, int expirationMinutes,
         CancellationToken ct = default)
     {
-        var baseTags  = NormalizeTags(tags);
-        var result    = new BulkSetResult { KeyPrefix = keyPrefix, Requested = count };
-        var sw        = System.Diagnostics.Stopwatch.StartNew();
+        var baseTags = NormalizeTags(tags);
+        var result   = new BulkSetResult { KeyPrefix = keyPrefix, Requested = count };
+        var sw       = System.Diagnostics.Stopwatch.StartNew();
+
+        _logger.LogInformation(
+            "Bulk SET START | Prefix: {KeyPrefix} | Count: {Count} | TTL: {Ttl}m | Tags: [{Tags}]",
+            keyPrefix, count, expirationMinutes, string.Join(", ", baseTags));
 
         for (var i = 1; i <= count; i++)
         {
-            var key              = $"{keyPrefix}-{i}";
-            var (label, json)    = RandomDataFactory.Generate();
-            var entryTags        = new List<string>(baseTags) { NormalizeTag(label) };
+            var key           = $"{keyPrefix}-{i}";
+            var (label, json) = RandomDataFactory.Generate();
+            var entryTags     = new List<string>(baseTags) { NormalizeTag(label) };
 
             await SetAsync(key, json, entryTags, expirationMinutes, ct);
 
@@ -101,6 +116,11 @@ public sealed class CachePlaygroundService : ICachePlaygroundService
         sw.Stop();
         result.Added     = count;
         result.ElapsedMs = sw.ElapsedMilliseconds;
+
+        _logger.LogInformation(
+            "Bulk SET COMPLETE | Prefix: {KeyPrefix} | Added: {Added} | Elapsed: {ElapsedMs}ms",
+            keyPrefix, count, sw.ElapsedMilliseconds);
+
         return result;
     }
 
@@ -128,6 +148,7 @@ public sealed class CachePlaygroundService : ICachePlaygroundService
         if (isHit)
         {
             Interlocked.Increment(ref _hits);
+            _logger.LogInformation("Cache HIT  {Key}", key);
 
             if (_metadata.TryGetValue(key, out var meta))
                 meta.LastAccessedAt = now;
@@ -144,7 +165,9 @@ public sealed class CachePlaygroundService : ICachePlaygroundService
 
             if (factoryRan && value is not null)
             {
-                // Cache the factory-generated entry in our metadata tracker
+                _logger.LogInformation(
+                    "Cache MISS {Key} | Factory ran | Label: {Label}", key, factoryLabel);
+
                 var autoTags = new List<string> { "factory-generated", NormalizeTag(factoryLabel ?? "unknown") };
 
                 _metadata[key] = new CacheEntryMetadata
@@ -163,7 +186,13 @@ public sealed class CachePlaygroundService : ICachePlaygroundService
             }
             else if (factoryRan)
             {
+                _logger.LogWarning(
+                    "Cache MISS {Key} | Factory ran but returned null — key has no value", key);
                 _metadata.TryRemove(key, out _);
+            }
+            else
+            {
+                _logger.LogInformation("Cache MISS {Key} | No factory run (key unknown)", key);
             }
         }
 
@@ -179,13 +208,19 @@ public sealed class CachePlaygroundService : ICachePlaygroundService
 
     // ─── Stampede test ───────────────────────────────────────────────────────
 
-    public async Task<StampedeResult> RunStampedeTestAsync(string key, int concurrency, bool forceEvict, CancellationToken ct = default)
+    public async Task<StampedeResult> RunStampedeTestAsync(
+        string key, int concurrency, bool forceEvict, CancellationToken ct = default)
     {
+        _logger.LogInformation(
+            "Stampede TEST START | Key: {Key} | Concurrency: {Concurrency} | ForceEvict: {ForceEvict}",
+            key, concurrency, forceEvict);
+
         if (forceEvict)
         {
             await _cache.RemoveAsync(key, ct);
             _metadata.TryRemove(key, out _);
             if (_keyRegistry.TryGetValue(key, out var k)) k.IsCurrentlyActive = false;
+            _logger.LogDebug("Stampede pre-evict | Key: {Key}", key);
         }
 
         var localFactoryHits = 0;
@@ -198,7 +233,6 @@ public sealed class CachePlaygroundService : ICachePlaygroundService
                 Interlocked.Increment(ref localFactoryHits);
                 Interlocked.Increment(ref _factoryInvocations);
 
-                // 50ms delay widens the coalescing window so the test is meaningful
                 await Task.Delay(50, innerCt);
 
                 var (_, json) = RandomDataFactory.Generate();
@@ -212,6 +246,25 @@ public sealed class CachePlaygroundService : ICachePlaygroundService
 
         var successCount = results.Count(v => v is not null);
         var now = DateTimeOffset.UtcNow;
+
+        if (localFactoryHits == 1)
+        {
+            _logger.LogInformation(
+                "Stampede TEST PASS | Key: {Key} | Requests: {Concurrency} | FactoryRan: {FactoryRan} | Success: {Success} | Elapsed: {ElapsedMs}ms",
+                key, concurrency, localFactoryHits, successCount, sw.ElapsedMilliseconds);
+        }
+        else if (localFactoryHits == 0)
+        {
+            _logger.LogInformation(
+                "Stampede TEST — all HITs | Key: {Key} | Requests: {Concurrency} | Elapsed: {ElapsedMs}ms",
+                key, concurrency, sw.ElapsedMilliseconds);
+        }
+        else
+        {
+            _logger.LogWarning(
+                "Stampede TEST FAIL | Key: {Key} | FactoryRan {FactoryRan} times (expected 1) | Concurrency: {Concurrency} | Elapsed: {ElapsedMs}ms",
+                key, localFactoryHits, concurrency, sw.ElapsedMilliseconds);
+        }
 
         if (localFactoryHits > 0 && capturedValue is not null)
         {
@@ -232,7 +285,6 @@ public sealed class CachePlaygroundService : ICachePlaygroundService
             RegisterTags(tags, key, now);
         }
 
-        // 1 miss (factory ran) + (successCount - 1) hits coalesced by HybridCache
         if (localFactoryHits > 0)
         {
             Interlocked.Increment(ref _misses);
@@ -255,9 +307,49 @@ public sealed class CachePlaygroundService : ICachePlaygroundService
         };
     }
 
+    // ─── Remove ───────────────────────────────────────────────────────────────
+
+    public async Task RemoveAsync(string key, CancellationToken ct = default)
+    {
+        _logger.LogInformation("Cache REMOVE {Key}", key);
+
+        await _cache.RemoveAsync(key, ct);
+        _metadata.TryRemove(key, out _);
+
+        if (_keyRegistry.TryGetValue(key, out var entry))
+            entry.IsCurrentlyActive = false;
+    }
+
+    public async Task<int> RemoveByTagAsync(string tag, CancellationToken ct = default)
+    {
+        var normalizedTag = NormalizeTag(tag);
+
+        _logger.LogInformation("Cache REMOVE BY TAG {Tag}", normalizedTag);
+
+        await _cache.RemoveByTagAsync(normalizedTag, ct);
+
+        var removed = 0;
+        foreach (var kvp in _metadata)
+        {
+            if (kvp.Value.Tags.Contains(normalizedTag))
+            {
+                if (_metadata.TryRemove(kvp.Key, out _))
+                {
+                    removed++;
+                    if (_keyRegistry.TryGetValue(kvp.Key, out var keyEntry))
+                        keyEntry.IsCurrentlyActive = false;
+                }
+            }
+        }
+
+        _logger.LogInformation(
+            "Cache REMOVE BY TAG {Tag} complete | Removed: {Count} entries", normalizedTag, removed);
+
+        return removed;
+    }
+
     // ─── Wildcard helpers ────────────────────────────────────────────────────
 
-    /// <summary>Converts a glob pattern (* / ?) to a compiled Regex, case-insensitive.</summary>
     private static Regex GlobToRegex(string pattern)
     {
         var escaped = Regex.Escape(pattern.Trim().ToLowerInvariant())
@@ -276,46 +368,21 @@ public sealed class CachePlaygroundService : ICachePlaygroundService
     public async Task<(int RemovedEntries, IReadOnlyList<string> MatchedTags)> RemoveByTagWildcardAsync(
         string pattern, CancellationToken ct = default)
     {
-        var matchedTags = GetMatchingTags(pattern);
+        var matchedTags  = GetMatchingTags(pattern);
         var totalRemoved = 0;
+
+        _logger.LogInformation(
+            "Cache WILDCARD REMOVE {Pattern} | Matched tags: [{MatchedTags}]",
+            pattern, string.Join(", ", matchedTags));
 
         foreach (var tag in matchedTags)
             totalRemoved += await RemoveByTagAsync(tag, ct);
 
+        _logger.LogInformation(
+            "Cache WILDCARD REMOVE {Pattern} complete | Tags matched: {TagCount} | Entries removed: {Removed}",
+            pattern, matchedTags.Count, totalRemoved);
+
         return (totalRemoved, matchedTags);
-    }
-
-    // ─── Remove ───────────────────────────────────────────────────────────────
-
-    public async Task RemoveAsync(string key, CancellationToken ct = default)
-    {
-        await _cache.RemoveAsync(key, ct);
-        _metadata.TryRemove(key, out _);
-
-        if (_keyRegistry.TryGetValue(key, out var entry))
-            entry.IsCurrentlyActive = false;
-    }
-
-    public async Task<int> RemoveByTagAsync(string tag, CancellationToken ct = default)
-    {
-        var normalizedTag = NormalizeTag(tag);
-        await _cache.RemoveByTagAsync(normalizedTag, ct);
-
-        var removed = 0;
-        foreach (var kvp in _metadata)
-        {
-            // Exact match — safe because all tags are normalized on write
-            if (kvp.Value.Tags.Contains(normalizedTag))
-            {
-                if (_metadata.TryRemove(kvp.Key, out _))
-                {
-                    removed++;
-                    if (_keyRegistry.TryGetValue(kvp.Key, out var keyEntry))
-                        keyEntry.IsCurrentlyActive = false;
-                }
-            }
-        }
-        return removed;
     }
 
     // ─── Queries ──────────────────────────────────────────────────────────────
@@ -353,8 +420,6 @@ public sealed class CachePlaygroundService : ICachePlaygroundService
 
     public IReadOnlyList<TagRegistryEntry> GetTagRegistry()
     {
-        // Single pass over active metadata to build tag → count map.
-        // O(entries × avg-tags-per-entry) instead of O(tags × entries).
         var activeTagCounts = new Dictionary<string, int>();
         foreach (var meta in _metadata.Values)
         {
@@ -371,12 +436,17 @@ public sealed class CachePlaygroundService : ICachePlaygroundService
 
     public void PruneExpired()
     {
+        var pruned = 0;
         foreach (var kvp in _metadata.Where(k => k.Value.IsExpired).ToList())
         {
             _metadata.TryRemove(kvp.Key, out _);
             if (_keyRegistry.TryGetValue(kvp.Key, out var entry))
                 entry.IsCurrentlyActive = false;
+            pruned++;
         }
+
+        if (pruned > 0)
+            _logger.LogDebug("Pruned {Count} expired cache metadata entries", pruned);
     }
 
     // ─── Private registry helpers ─────────────────────────────────────────────
