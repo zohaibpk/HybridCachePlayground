@@ -9,7 +9,7 @@
 <h2 class="mb-4">Get Cache Entry</h2>
 <p class="text-muted">
     Retrieves a value using
-    <code>HybridCache.GetOrCreateAsync(key, factory)</code>.
+    <code>HybridCache.GetOrCreateAsync(key, factory, options)</code>.
     If the key is not in cache, the factory runs (miss).
 </p>
 
@@ -17,6 +17,8 @@
     <div class="col-md-7">
         <form asp-action="Get" method="post">
             @Html.AntiForgeryToken()
+
+            <!-- Key -->
             <div class="mb-3">
                 <label asp-for="Key" class="form-label fw-semibold">Cache Key</label>
                 <input asp-for="Key" id="Key" class="form-control" placeholder="e.g. user:42" />
@@ -33,6 +35,65 @@
                     </div>
                 }
             </div>
+
+            <!-- Factory Template -->
+            <div class="mb-3">
+                <label asp-for="FactoryTemplateIndex" class="form-label fw-semibold">
+                    Factory Template <span class="text-muted fw-normal">(used on cache miss)</span>
+                </label>
+                <select asp-for="FactoryTemplateIndex" class="form-select">
+                    <option value="-1">Random (any template)</option>
+                    @for (var i = 0; i < HybridCachePlayground.Web.Services.RandomDataFactory.Templates.Length; i++)
+                    {
+                        <option value="@i">@HybridCachePlayground.Web.Services.RandomDataFactory.Templates[i].Label</option>
+                    }
+                </select>
+                <div class="form-text">If the key is missing, the factory generates a value from this template.</div>
+            </div>
+
+            <!-- HybridCacheEntryFlags -->
+            <div class="mb-4">
+                <label class="form-label fw-semibold">Cache Flags</label>
+                <div class="row g-2">
+                    <div class="col-md-6">
+                        <div class="border rounded p-2 flag-check d-flex align-items-start gap-2">
+                            <input class="form-check-input flex-shrink-0 mt-1" asp-for="DisableLocalCacheRead" id="DisableLocalCacheRead" />
+                            <label for="DisableLocalCacheRead" class="mb-0" style="cursor:pointer;">
+                                <span class="fw-semibold d-block small">Disable L1 Read</span>
+                                <span class="text-muted" style="font-size:.8rem">Skip in-process cache on read — always go to L2+factory.</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="border rounded p-2 flag-check d-flex align-items-start gap-2">
+                            <input class="form-check-input flex-shrink-0 mt-1" asp-for="DisableDistributedCacheRead" id="DisableDistributedCacheRead" />
+                            <label for="DisableDistributedCacheRead" class="mb-0" style="cursor:pointer;">
+                                <span class="fw-semibold d-block small">Disable L2 Read</span>
+                                <span class="text-muted" style="font-size:.8rem">Skip distributed cache on read — go straight to factory.</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="border rounded p-2 flag-check d-flex align-items-start gap-2">
+                            <input class="form-check-input flex-shrink-0 mt-1" asp-for="DisableLocalCacheWrite" id="DisableLocalCacheWrite" />
+                            <label for="DisableLocalCacheWrite" class="mb-0" style="cursor:pointer;">
+                                <span class="fw-semibold d-block small">Disable L1 Write</span>
+                                <span class="text-muted" style="font-size:.8rem">Don't populate in-process cache after factory runs.</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="border rounded p-2 flag-check d-flex align-items-start gap-2">
+                            <input class="form-check-input flex-shrink-0 mt-1" asp-for="DisableDistributedCacheWrite" id="DisableDistributedCacheWrite" />
+                            <label for="DisableDistributedCacheWrite" class="mb-0" style="cursor:pointer;">
+                                <span class="fw-semibold d-block small">Disable L2 Write</span>
+                                <span class="text-muted" style="font-size:.8rem">Don't write to distributed cache after factory runs.</span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <button type="submit" class="btn btn-primary">Get from Cache</button>
             <a asp-controller="Home" asp-action="Index" class="btn btn-link">Back to Dashboard</a>
         </form>
@@ -56,6 +117,10 @@
                         @if (!result.HasResult)
                         {
                             <strong>No value returned (key was never set or has expired).</strong>
+                        }
+                        else if (result.FactoryLabel is not null)
+                        {
+                            <span>Generated: <strong>@result.FactoryLabel</strong></span>
                         }
                     </span>
                 </div>
@@ -90,6 +155,11 @@
             // stampede-safe (only runs once
             // even under concurrent requests)
             return await FetchFromDb(ct);
+        },
+        new HybridCacheEntryOptions
+        {
+            Flags = HybridCacheEntryFlags
+                .DisableLocalCacheRead
         });</code></pre>
             </div>
         </div>
@@ -99,6 +169,19 @@
                 HybridCache serialises concurrent requests for the
                 same key — the factory runs only <strong>once</strong>,
                 even if 100 requests arrive simultaneously.
+            </div>
+        </div>
+        <div class="card mt-3">
+            <div class="card-header bg-secondary small">Flag quick reference</div>
+            <div class="card-body small">
+                <table class="table table-sm mb-0">
+                    <tbody>
+                        <tr><td><code>DisableLocalCacheRead</code></td><td>Always fetch from L2/factory</td></tr>
+                        <tr><td><code>DisableDistributedCacheRead</code></td><td>Bypass L2 on read</td></tr>
+                        <tr><td><code>DisableLocalCacheWrite</code></td><td>Don't cache in L1</td></tr>
+                        <tr><td><code>DisableDistributedCacheWrite</code></td><td>Don't cache in L2</td></tr>
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>
@@ -128,4 +211,8 @@
         return h.toString(16).toUpperCase();
     }
     </script>
+    <style>
+    .flag-check { background: #161b22; border-color: #30363d !important; transition: border-color .15s; }
+    .flag-check:has(.form-check-input:checked) { border-color: #388bfd !important; }
+    </style>
 }

@@ -36,11 +36,18 @@
 
             <!-- Value -->
             <div class="mb-3">
-                <div class="d-flex justify-content-between align-items-center mb-1">
+                <div class="d-flex justify-content-between align-items-center mb-1 flex-wrap gap-2">
                     <label asp-for="Value" class="form-label fw-semibold mb-0">
                         Value <span class="text-muted fw-normal">(any string or JSON)</span>
                     </label>
-                    <div class="d-flex align-items-center gap-2">
+                    <div class="d-flex align-items-center gap-2 flex-wrap">
+                        <select id="templateSelect" class="form-select form-select-sm" style="width:auto;">
+                            <option value="-1">Random template</option>
+                            @for (var i = 0; i < HybridCachePlayground.Web.Services.RandomDataFactory.Templates.Length; i++)
+                            {
+                                <option value="@i">@HybridCachePlayground.Web.Services.RandomDataFactory.Templates[i].Label</option>
+                            }
+                        </select>
                         <span id="factoryLabel" class="badge text-bg-secondary d-none"></span>
                         <button type="button" id="btnGenerate" class="btn btn-sm btn-outline-secondary">
                             &#x2728; Generate
@@ -78,11 +85,36 @@
             </div>
 
             <!-- Expiration -->
-            <div class="mb-4">
+            <div class="mb-3">
                 <label asp-for="ExpirationMinutes" class="form-label fw-semibold">Expiration (minutes)</label>
                 <input asp-for="ExpirationMinutes" type="number" class="form-control" min="1" max="1440" />
                 <span asp-validation-for="ExpirationMinutes" class="text-danger small"></span>
                 <div class="form-text">L1 (local) TTL = min(this, 2 min). L2 TTL = this value.</div>
+            </div>
+
+            <!-- Write flags -->
+            <div class="mb-4">
+                <label class="form-label fw-semibold">Write Flags</label>
+                <div class="row g-2">
+                    <div class="col-md-6">
+                        <div class="border rounded p-2 flag-check d-flex align-items-start gap-2">
+                            <input class="form-check-input flex-shrink-0 mt-1" asp-for="DisableLocalCacheWrite" id="DisableLocalCacheWrite" />
+                            <label for="DisableLocalCacheWrite" class="mb-0" style="cursor:pointer;">
+                                <span class="fw-semibold d-block small">Disable L1 Write</span>
+                                <span class="text-muted" style="font-size:.8rem">Don't store in in-process (L1) cache.</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="border rounded p-2 flag-check d-flex align-items-start gap-2">
+                            <input class="form-check-input flex-shrink-0 mt-1" asp-for="DisableDistributedCacheWrite" id="DisableDistributedCacheWrite" />
+                            <label for="DisableDistributedCacheWrite" class="mb-0" style="cursor:pointer;">
+                                <span class="fw-semibold d-block small">Disable L2 Write</span>
+                                <span class="text-muted" style="font-size:.8rem">Don't store in distributed (L2) cache.</span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <button type="submit" class="btn btn-primary">Store in Cache</button>
@@ -111,6 +143,10 @@
 
 @section Scripts {
     @{await Html.RenderPartialAsync("_ValidationScriptsPartial");}
+    <style>
+    .flag-check { background: #161b22; border-color: #30363d !important; transition: border-color .15s; }
+    .flag-check:has(.form-check-input:checked) { border-color: #388bfd !important; }
+    </style>
     <script>
     // ── Fill-chip: click populates an input field ──────────────────────────
     document.querySelectorAll('[data-fill-id]').forEach(function (btn) {
@@ -138,7 +174,9 @@
         btn.textContent = 'Generating…';
 
         try {
-            var resp = await fetch('@Url.Action("GenerateValue", "Cache")');
+            var templateIndex = document.getElementById('templateSelect').value;
+            var url = '@Url.Action("GenerateValue", "Cache")?templateIndex=' + templateIndex;
+            var resp = await fetch(url);
             if (!resp.ok) throw new Error('Request failed');
             var data = await resp.json();
 

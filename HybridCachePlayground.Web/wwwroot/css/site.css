@@ -157,8 +157,112 @@ pre code { color: inherit; }
 .miss-badge { background-color: #dc3545 !important; color: #fff !important; }
 
 /* ── Navbar ───────────────────────────────────────────────────────────────── */
-.navbar-dark .navbar-nav .nav-link       { color: rgba(255,255,255,.75); }
-.navbar-dark .navbar-nav .nav-link:hover { color: #fff; }
+.hcp-navbar {
+  background: #0d1117;
+  border-bottom: 1px solid #21262d;
+  padding-top: .5rem;
+  padding-bottom: .5rem;
+  box-shadow: 0 1px 8px rgba(0,0,0,.45);
+}
+
+/* Brand */
+.hcp-brand {
+  display: flex;
+  align-items: center;
+  gap: .45rem;
+  font-weight: 700;
+  font-size: 1rem;
+  color: #e6edf3 !important;
+  text-decoration: none;
+  letter-spacing: .01em;
+}
+.hcp-brand i {
+  font-size: 1.2rem;
+  color: #4d9ef7;
+}
+.hcp-brand:hover { color: #fff !important; }
+
+/* Pill nav — main links */
+.hcp-nav-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .25rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.hcp-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  padding: .35rem .85rem;
+  border-radius: 6px;
+  font-size: .82rem;
+  font-weight: 500;
+  color: #8b949e;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background .15s, color .15s;
+  min-width: 90px;
+  justify-content: center;
+}
+.hcp-pill i { font-size: .9rem; }
+.hcp-pill:hover {
+  background: #161b22;
+  color: #e6edf3;
+}
+.hcp-pill.active {
+  background: #1f2d3d;
+  color: #4d9ef7;
+  font-weight: 600;
+}
+
+/* Icon-only action buttons (right side) */
+.hcp-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 6px;
+  color: #8b949e;
+  text-decoration: none;
+  font-size: 1rem;
+  transition: background .15s, color .15s;
+  position: relative;
+}
+.hcp-icon-btn:hover {
+  background: #161b22;
+  color: #e6edf3;
+}
+.hcp-icon-btn.active {
+  background: #1f2d3d;
+  color: #4d9ef7;
+}
+.hcp-icon-btn.hcp-icon-warning       { color: #d29922; }
+.hcp-icon-btn.hcp-icon-warning:hover { background: #2d1f02; color: #ffc107; }
+.hcp-icon-btn.hcp-icon-warning.active{ background: #2d1f02; color: #ffc107; }
+
+/* Vertical divider between icon groups */
+.hcp-divider {
+  width: 1px;
+  height: 20px;
+  background: #21262d;
+  align-self: center;
+  margin: 0 .15rem;
+}
+
+/* Notification dropdown */
+.hcp-notif-dropdown {
+  min-width: 320px;
+  max-width: 380px;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.5);
+}
+.hcp-notif-dropdown .border-bottom { border-color: #30363d !important; }
 
 /* ── Footer ───────────────────────────────────────────────────────────────── */
 footer { color: #5a6478 !important; border-top-color: #2d3139 !important; }

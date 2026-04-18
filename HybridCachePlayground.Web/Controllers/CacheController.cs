@@ -88,10 +88,11 @@ public class CacheController : Controller
         }
 
         _logger.LogInformation(
-            "Set requested | Key: {Key} | Tags: [{Tags}] | TTL: {Ttl}m",
-            model.Key, string.Join(", ", model.ParsedTags), model.ExpirationMinutes);
+            "Set requested | Key: {Key} | Tags: [{Tags}] | TTL: {Ttl}m | Flags: {Flags}",
+            model.Key, string.Join(", ", model.ParsedTags), model.ExpirationMinutes, model.GetEntryFlags());
 
-        await _cacheService.SetAsync(model.Key, model.Value, model.ParsedTags, model.ExpirationMinutes);
+        await _cacheService.SetAsync(
+            model.Key, model.Value, model.ParsedTags, model.ExpirationMinutes, model.GetEntryFlags());
 
         TempData["Message"] = $"Entry '{model.Key}' stored successfully with {model.ParsedTags.Count} tag(s).";
         TempData["MessageType"] = "success";
@@ -117,9 +118,12 @@ public class CacheController : Controller
             return View(model);
         }
 
-        _logger.LogInformation("Get requested | Key: {Key}", model.Key);
+        _logger.LogInformation(
+            "Get requested | Key: {Key} | Flags: {Flags} | Template: {Template}",
+            model.Key, model.GetEntryFlags(), model.FactoryTemplateIndex);
 
-        var result = await _cacheService.GetOrCreateAsync(model.Key);
+        var result = await _cacheService.GetOrCreateAsync(
+            model.Key, model.GetEntryFlags(), model.FactoryTemplateIndex);
         ViewData["Result"] = result;
         InjectRecentKeys();
         return View(model);
@@ -243,10 +247,24 @@ public class CacheController : Controller
     // ─── Generate Value (AJAX) ────────────────────────────────────────────────
 
     [HttpGet]
-    public IActionResult GenerateValue()
+    public IActionResult GenerateValue(int templateIndex = -1)
     {
-        var (label, json) = RandomDataFactory.Generate();
-        _logger.LogDebug("GenerateValue called | Label: {Label}", label);
-        return Json(new { label, json });
+        var (label, json) = templateIndex >= 0
+            ? RandomDataFactory.GenerateFromTemplate(templateIndex)
+            : RandomDataFactory.Generate();
+
+        _logger.LogDebug("GenerateValue called | Template: {Template} | Label: {Label}", templateIndex, label);
+        return Json(new { label, json, templateIndex });
+    }
+
+    // ─── Template names (AJAX) ────────────────────────────────────────────────
+
+    [HttpGet]
+    public IActionResult GetTemplates()
+    {
+        var templates = RandomDataFactory.Templates
+            .Select((t, i) => new { index = i, label = t.Label })
+            .ToList();
+        return Json(templates);
     }
 }

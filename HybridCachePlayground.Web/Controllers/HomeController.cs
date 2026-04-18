@@ -8,22 +8,30 @@ namespace HybridCachePlayground.Web.Controllers;
 public class HomeController : Controller
 {
     private readonly ICachePlaygroundService _cacheService;
+    private readonly INotificationService _notifications;
     private readonly ILogger<HomeController> _logger;
 
-    public HomeController(ICachePlaygroundService cacheService, ILogger<HomeController> logger)
+    public HomeController(
+        ICachePlaygroundService cacheService,
+        INotificationService notifications,
+        ILogger<HomeController> logger)
     {
-        _cacheService = cacheService;
-        _logger = logger;
+        _cacheService  = cacheService;
+        _notifications = notifications;
+        _logger        = logger;
     }
 
     public IActionResult Index()
     {
+        var recent = _notifications.GetRecent(1000);
         var vm = new DashboardViewModel
         {
-            Entries = _cacheService.GetAllEntries().ToList(),
-            Stats = _cacheService.GetStats(),
-            KeyRegistry = _cacheService.GetKeyRegistry().ToList(),
-            TagRegistry = _cacheService.GetTagRegistry().ToList()
+            Entries              = _cacheService.GetAllEntries().ToList(),
+            Stats                = _cacheService.GetStats(),
+            KeyRegistry          = _cacheService.GetKeyRegistry().ToList(),
+            TagRegistry          = _cacheService.GetTagRegistry().ToList(),
+            TotalNotifications   = recent.Count,
+            UnreadNotifications  = _notifications.GetUnreadCount()
         };
 
         _logger.LogDebug(

@@ -1,13 +1,18 @@
 using HybridCachePlayground.Web.Services;
 using Microsoft.Extensions.Caching.Hybrid;
 using Serilog;
+using Serilog.Events;
+
+// ─── Startup-specific log file ────────────────────────────────────────────────
+var startupTimestamp = DateTimeOffset.Now.ToString("yyyyMMdd-HHmmss");
+var startupLogPath   = Path.Combine("logs", $"session-{startupTimestamp}.log");
 
 // ─── Bootstrap Serilog early so startup errors are captured ──────────────────
 Log.Logger = new LoggerConfiguration()
     .WriteTo.Console()
     .CreateBootstrapLogger();
 
-Log.Information("HybridCache Playground starting up");
+Log.Information("HybridCache Playground starting up | Session log: {LogPath}", startupLogPath);
 
 try
 {
@@ -17,7 +22,12 @@ try
     builder.Host.UseSerilog((ctx, services, lc) => lc
         .ReadFrom.Configuration(ctx.Configuration)
         .ReadFrom.Services(services)
-        .Enrich.FromLogContext());
+        .Enrich.FromLogContext()
+        // Per-startup session log — separate from the rolling daily log
+        .WriteTo.File(
+            startupLogPath,
+            outputTemplate: "{Timestamp:HH:mm:ss.fff} [{Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}",
+            restrictedToMinimumLevel: LogEventLevel.Debug));
 
     // ─── Caching ──────────────────────────────────────────────────────────────
     // L1: IMemoryCache  (built-in, enabled automatically by AddHybridCache)
@@ -48,6 +58,9 @@ try
     });
 
     builder.Services.AddSingleton<ICachePlaygroundService, CachePlaygroundService>();
+    builder.Services.AddSingleton(new LogFilePathProvider(startupLogPath));
+    builder.Services.AddSingleton<INotificationService, NotificationService>();
+    builder.Services.AddSingleton<IDebugToolsService, DebugToolsService>();
 
     // ─── MVC ──────────────────────────────────────────────────────────────────
     builder.Services.AddControllersWithViews();

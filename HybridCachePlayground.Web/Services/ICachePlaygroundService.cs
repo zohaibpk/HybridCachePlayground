@@ -1,14 +1,21 @@
 using HybridCachePlayground.Web.Models;
+using Microsoft.Extensions.Caching.Hybrid;
 
 namespace HybridCachePlayground.Web.Services;
 
 public interface ICachePlaygroundService
 {
-    Task SetAsync(string key, string value, IEnumerable<string> tags, int expirationMinutes, CancellationToken ct = default);
+    Task SetAsync(string key, string value, IEnumerable<string> tags, int expirationMinutes,
+        HybridCacheEntryFlags flags = HybridCacheEntryFlags.None, CancellationToken ct = default);
 
-    Task<BulkSetResult> BulkSetAsync(string keyPrefix, int count, IEnumerable<string> tags, int expirationMinutes, CancellationToken ct = default);
+    Task<BulkSetResult> BulkSetAsync(string keyPrefix, int count, IEnumerable<string> tags,
+        int expirationMinutes, HybridCacheEntryFlags flags = HybridCacheEntryFlags.None,
+        CancellationToken ct = default);
 
-    Task<CacheGetResult> GetOrCreateAsync(string key, CancellationToken ct = default);
+    Task<CacheGetResult> GetOrCreateAsync(string key,
+        HybridCacheEntryFlags flags = HybridCacheEntryFlags.None,
+        int factoryTemplateIndex = -1,
+        CancellationToken ct = default);
 
     Task<StampedeResult> RunStampedeTestAsync(string key, int concurrency, bool forceEvict, CancellationToken ct = default);
 
@@ -32,4 +39,7 @@ public interface ICachePlaygroundService
     IReadOnlyList<TagRegistryEntry> GetTagRegistry();
 
     void PruneExpired();
+
+    /// <summary>Reset hit / miss / factory invocation counters to zero.</summary>
+    void ResetStatistics();
 }

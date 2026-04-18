@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using HybridCachePlayground.Web.Models;
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Logging;
+#pragma warning disable CA1848 // use LoggerMessage delegates (playground code)
 
 namespace HybridCachePlayground.Web.Services;
 
@@ -46,25 +47,30 @@ public sealed class CachePlaygroundService : ICachePlaygroundService
     private static List<string> NormalizeTags(IEnumerable<string> tags) =>
         tags.Select(NormalizeTag).Distinct().ToList();
 
-    private HybridCacheEntryOptions MakeOptions(int expirationMinutes) => new()
+    private HybridCacheEntryOptions MakeOptions(
+        int expirationMinutes,
+        HybridCacheEntryFlags flags = HybridCacheEntryFlags.None) => new()
     {
         Expiration = TimeSpan.FromMinutes(expirationMinutes),
         LocalCacheExpiration = TimeSpan.FromMinutes(
-            Math.Min(expirationMinutes, _defaultLocalTtlMinutes))
+            Math.Min(expirationMinutes, _defaultLocalTtlMinutes)),
+        Flags = flags
     };
 
     // ─── Set ─────────────────────────────────────────────────────────────────
 
     public async Task SetAsync(string key, string value, IEnumerable<string> tags,
-        int expirationMinutes, CancellationToken ct = default)
+        int expirationMinutes,
+        HybridCacheEntryFlags flags = HybridCacheEntryFlags.None,
+        CancellationToken ct = default)
     {
         var tagList = NormalizeTags(tags);
 
         _logger.LogInformation(
-            "Cache SET {Key} | TTL: {Ttl}m | Tags: [{Tags}]",
-            key, expirationMinutes, string.Join(", ", tagList));
+            "Cache SET {Key} | TTL: {Ttl}m | Tags: [{Tags}] | Flags: {Flags}",
+            key, expirationMinutes, string.Join(", ", tagList), flags);
 
-        await _cache.SetAsync(key, value, MakeOptions(expirationMinutes), tagList, ct);
+        await _cache.SetAsync(key, value, MakeOptions(expirationMinutes, flags), tagList, ct);
 
         var now = DateTimeOffset.UtcNow;
         var expiresAt = now.AddMinutes(expirationMinutes);
@@ -86,6 +92,7 @@ public sealed class CachePlaygroundService : ICachePlaygroundService
 
     public async Task<BulkSetResult> BulkSetAsync(
         string keyPrefix, int count, IEnumerable<string> tags, int expirationMinutes,
+        HybridCacheEntryFlags flags = HybridCacheEntryFlags.None,
         CancellationToken ct = default)
     {
         var baseTags = NormalizeTags(tags);
@@ -102,7 +109,7 @@ public sealed class CachePlaygroundService : ICachePlaygroundService
             var (label, json) = RandomDataFactory.Generate();
             var entryTags     = new List<string>(baseTags) { NormalizeTag(label) };
 
-            await SetAsync(key, json, entryTags, expirationMinutes, ct);
+            await SetAsync(key, json, entryTags, expirationMinutes, flags, ct);
 
             result.Entries.Add(new BulkSetResultEntry
             {
@@ -126,21 +133,29 @@ public sealed class CachePlaygroundService : ICachePlaygroundService
 
     // ─── Get / GetOrCreate ────────────────────────────────────────────────────
 
-    public async Task<CacheGetResult> GetOrCreateAsync(string key, CancellationToken ct = default)
+    public async Task<CacheGetResult> GetOrCreateAsync(
+        string key,
+        HybridCacheEntryFlags flags = HybridCacheEntryFlags.None,
+        int factoryTemplateIndex = -1,
+        CancellationToken ct = default)
     {
         var factoryRan = false;
         string? factoryLabel = null;
+
+        var options = MakeOptions(_defaultTtlMinutes, flags);
 
         var value = await _cache.GetOrCreateAsync(key, innerCt =>
         {
             factoryRan = true;
             Interlocked.Increment(ref _factoryInvocations);
 
-            var (label, json) = RandomDataFactory.Generate();
+            var (label, json) = factoryTemplateIndex >= 0
+                ? RandomDataFactory.GenerateFromTemplate(factoryTemplateIndex)
+                : RandomDataFactory.Generate();
             factoryLabel = label;
 
             return ValueTask.FromResult(json);
-        }, cancellationToken: ct);
+        }, options, cancellationToken: ct);
 
         var isHit = !factoryRan && value is not null;
         var now = DateTimeOffset.UtcNow;
@@ -447,6 +462,16 @@ public sealed class CachePlaygroundService : ICachePlaygroundService
 
         if (pruned > 0)
             _logger.LogDebug("Pruned {Count} expired cache metadata entries", pruned);
+    }
+
+    // ─── Stats reset ─────────────────────────────────────────────────────────
+
+    public void ResetStatistics()
+    {
+        Interlocked.Exchange(ref _hits, 0);
+        Interlocked.Exchange(ref _misses, 0);
+        Interlocked.Exchange(ref _factoryInvocations, 0);
+        _logger.LogInformation("Statistics reset — hits/misses/factory counters zeroed");
     }
 
     // ─── Private registry helpers ─────────────────────────────────────────────

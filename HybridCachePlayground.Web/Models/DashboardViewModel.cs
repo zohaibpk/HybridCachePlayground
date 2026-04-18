@@ -6,4 +6,6 @@ public class DashboardViewModel
     public CacheStats Stats { get; set; } = new();
     public List<KeyRegistryEntry> KeyRegistry { get; set; } = [];
     public List<TagRegistryEntry> TagRegistry { get; set; } = [];
+    public int TotalNotifications { get; set; }
+    public int UnreadNotifications { get; set; }
 }
