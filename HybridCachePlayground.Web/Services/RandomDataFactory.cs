@@ -21,20 +21,20 @@ public static class RandomDataFactory
 
     // ─── Templates: (label, ordered field list) ───────────────────────────────
     // 3–5 fields are randomly sampled from each template's list per call.
-    public static readonly (string Label, string[] Fields)[] Templates =
+    public static readonly (string Label, string[] Fields, string[] Tags)[] Templates =
     [
-        ("User",      ["id", "firstName", "lastName", "email", "role", "department", "status"]),
-        ("Product",   ["id", "name", "price", "category", "stock", "status", "tier"]),
-        ("Order",     ["orderId", "customerId", "total", "status", "createdAt", "itemCount", "priority"]),
-        ("Session",   ["sessionId", "userId", "ipAddress", "expiresAt", "role", "country"]),
-        ("Analytics", ["eventId", "userId", "action", "city", "country", "timestamp"]),
-        ("Employee",  ["id", "firstName", "lastName", "department", "salary", "createdAt", "status"]),
+        ("User",      ["id", "firstName", "lastName", "email", "role", "department", "status"],   ["user", "identity", "user-data"]),
+        ("Product",   ["id", "name", "price", "category", "stock", "status", "tier"],             ["product", "catalog", "inventory"]),
+        ("Order",     ["orderId", "customerId", "total", "status", "createdAt", "itemCount", "priority"], ["order", "transaction", "orders"]),
+        ("Session",   ["sessionId", "userId", "ipAddress", "expiresAt", "role", "country"],       ["session", "auth", "session-data"]),
+        ("Analytics", ["eventId", "userId", "action", "city", "country", "timestamp"],            ["analytics", "events", "tracking"]),
+        ("Employee",  ["id", "firstName", "lastName", "department", "salary", "createdAt", "status"], ["employee", "hr", "staff"]),
     ];
 
-    /// <summary>Generates a random JSON object. Returns (templateLabel, prettyJson).</summary>
-    public static (string Label, string Json) Generate()
+    /// <summary>Generates a random JSON object. Returns (templateLabel, prettyJson, suggestedTags).</summary>
+    public static (string Label, string Json, string[] Tags) Generate()
     {
-        var (label, fields) = Templates[_rng.Next(Templates.Length)];
+        var (label, fields, tags) = Templates[_rng.Next(Templates.Length)];
         var count = _rng.Next(3, 6); // 3, 4, or 5 fields
         var selected = fields.OrderBy(_ => _rng.Next()).Take(count);
 
@@ -43,14 +43,14 @@ public static class RandomDataFactory
             dict[field] = GenerateValue(field);
 
         var json = JsonSerializer.Serialize(dict, new JsonSerializerOptions { WriteIndented = true });
-        return (label, json);
+        return (label, json, tags);
     }
 
     /// <summary>Generates a specific template by index (0-based). Useful for seeding.</summary>
-    public static (string Label, string Json) GenerateFromTemplate(int templateIndex)
+    public static (string Label, string Json, string[] Tags) GenerateFromTemplate(int templateIndex)
     {
         templateIndex = Math.Clamp(templateIndex, 0, Templates.Length - 1);
-        var (label, fields) = Templates[templateIndex];
+        var (label, fields, tags) = Templates[templateIndex];
         var count = _rng.Next(3, 6);
         var selected = fields.OrderBy(_ => _rng.Next()).Take(count);
 
@@ -59,7 +59,7 @@ public static class RandomDataFactory
             dict[field] = GenerateValue(field);
 
         var json = JsonSerializer.Serialize(dict, new JsonSerializerOptions { WriteIndented = true });
-        return (label, json);
+        return (label, json, tags);
     }
 
     private static object? GenerateValue(string field) => field switch

@@ -38,17 +38,45 @@
 
             <!-- Factory Template -->
             <div class="mb-3">
-                <label asp-for="FactoryTemplateIndex" class="form-label fw-semibold">
+                <label class="form-label fw-semibold">
                     Factory Template <span class="text-muted fw-normal">(used on cache miss)</span>
                 </label>
-                <select asp-for="FactoryTemplateIndex" class="form-select">
-                    <option value="-1">Random (any template)</option>
+                <input asp-for="FactoryTemplateIndex" type="hidden" id="FactoryTemplateIndex" />
+                <div class="d-flex flex-wrap gap-2 mb-2">
+                    <button type="button" class="btn btn-sm btn-outline-secondary tpl-btn active" data-tpl="-1">
+                        <i class="bi bi-shuffle me-1"></i>Random
+                    </button>
                     @for (var i = 0; i < HybridCachePlayground.Web.Services.RandomDataFactory.Templates.Length; i++)
                     {
-                        <option value="@i">@HybridCachePlayground.Web.Services.RandomDataFactory.Templates[i].Label</option>
+                        <button type="button" class="btn btn-sm btn-outline-secondary tpl-btn" data-tpl="@i">
+                            @HybridCachePlayground.Web.Services.RandomDataFactory.Templates[i].Label
+                        </button>
                     }
-                </select>
-                <div class="form-text">If the key is missing, the factory generates a value from this template.</div>
+                </div>
+                <div class="form-text mb-2">Click a template to generate a preview. Edit before submitting if needed.</div>
+            </div>
+
+            <!-- Factory Value Preview (editable) -->
+            <div class="mb-3">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                    <label asp-for="FactoryValue" class="form-label fw-semibold mb-0">
+                        Factory Value <span class="text-muted fw-normal small">(editable preview — blank = auto-generate on miss)</span>
+                    </label>
+                    <button type="button" id="btnRegenerate" class="btn btn-sm btn-outline-secondary d-none">
+                        <i class="bi bi-arrow-clockwise me-1"></i>Regenerate
+                    </button>
+                </div>
+                <textarea asp-for="FactoryValue" id="FactoryValue" class="form-control font-monospace"
+                          rows="6" placeholder="Leave blank to auto-generate on cache miss, or click a template above to preview and optionally edit the data."></textarea>
+            </div>
+
+            <!-- Tags for factory miss -->
+            <div class="mb-3">
+                <label asp-for="TagsRaw" class="form-label fw-semibold">
+                    Tags <span class="text-muted fw-normal small">(comma-separated — applied when factory stores value on miss)</span>
+                </label>
+                <input asp-for="TagsRaw" id="TagsRaw" class="form-control" placeholder="e.g. user, identity, user-data" />
+                <div class="form-text">Auto-filled from template; edit freely.</div>
             </div>
 
             <!-- HybridCacheEntryFlags -->
@@ -95,6 +123,7 @@
             </div>
 
             <button type="submit" class="btn btn-primary">Get from Cache</button>
+            <button type="button" id="btnClear" class="btn btn-outline-secondary">Clear</button>
             <a asp-controller="Home" asp-action="Index" class="btn btn-link">Back to Dashboard</a>
         </form>
 
@@ -190,12 +219,59 @@
 @section Scripts {
     @{await Html.RenderPartialAsync("_ValidationScriptsPartial");}
     <script>
+    // ── Recent key chips ──────────────────────────────────────────────────────
     document.querySelectorAll('[data-fill-id]').forEach(function (btn) {
         btn.addEventListener('click', function () {
             document.getElementById(btn.getAttribute('data-fill-id')).value = btn.getAttribute('data-fill-val');
         });
     });
 
+    // ── Template buttons ──────────────────────────────────────────────────────
+    var GENERATE_URL = '@Url.Action("GenerateValue", "Cache")';
+    var currentTpl = -1;
+
+    async function loadTemplate(tpl) {
+        currentTpl = tpl;
+        document.getElementById('FactoryTemplateIndex').value = tpl;
+        document.getElementById('btnRegenerate').classList.remove('d-none');
+
+        // Highlight active button
+        document.querySelectorAll('.tpl-btn').forEach(function(b) {
+            b.classList.toggle('active', parseInt(b.dataset.tpl) === tpl);
+        });
+
+        try {
+            var resp = await fetch(GENERATE_URL + '?templateIndex=' + tpl);
+            var data = await resp.json();
+            document.getElementById('FactoryValue').value = data.json;
+            document.getElementById('TagsRaw').value = (data.tags || []).join(', ');
+        } catch(e) {
+            console.error('Generate failed', e);
+        }
+    }
+
+    document.querySelectorAll('.tpl-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            loadTemplate(parseInt(btn.dataset.tpl));
+        });
+    });
+
+    document.getElementById('btnRegenerate').addEventListener('click', function() {
+        loadTemplate(currentTpl);
+    });
+
+    // ── Clear button ──────────────────────────────────────────────────────────
+    document.getElementById('btnClear').addEventListener('click', function() {
+        document.getElementById('Key').value          = '';
+        document.getElementById('FactoryValue').value = '';
+        document.getElementById('TagsRaw').value      = '';
+        document.getElementById('FactoryTemplateIndex').value = '-1';
+        document.getElementById('btnRegenerate').classList.add('d-none');
+        document.querySelectorAll('.tpl-btn').forEach(function(b) { b.classList.remove('active'); });
+        currentTpl = -1;
+    });
+
+    // ── Copy result ───────────────────────────────────────────────────────────
     function copyText(btn, key) {
         var preEl = document.getElementById('val-' + hashCode(key));
         if (!preEl) return;
@@ -214,5 +290,7 @@
     <style>
     .flag-check { background: #161b22; border-color: #30363d !important; transition: border-color .15s; }
     .flag-check:has(.form-check-input:checked) { border-color: #388bfd !important; }
+    .tpl-btn.active { background-color: #388bfd; border-color: #388bfd; color: #fff; }
+    #FactoryValue { font-size: .82rem; }
     </style>
 }

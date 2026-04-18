@@ -2,6 +2,12 @@
     var currentController = ViewContext.RouteData.Values["controller"]?.ToString() ?? "";
     var showToastNotifications = !currentController.Equals("Tools", StringComparison.OrdinalIgnoreCase);
 }
+@inject HybridCachePlayground.Web.Models.InstanceInfo InstanceInfo
+@{
+    var instanceId  = InstanceInfo.Id;
+    var machineName = InstanceInfo.MachineName;
+    var startedAt   = InstanceInfo.StartedAt.ToLocalTime().ToString("HH:mm:ss");
+}
 <!DOCTYPE html>
 <html lang="en" style="color-scheme: dark;">
 <head>
@@ -77,6 +83,25 @@
 
                     <!-- Right-side icon actions -->
                     <ul class="navbar-nav ms-auto hcp-icon-actions align-items-center gap-1">
+
+                        <!-- Instance badge -->
+                        <li class="nav-item">
+                            <span class="hcp-instance-badge" id="instanceBadge"
+                                  style="color: @InstanceInfo.Color; border-color: @InstanceInfo.Color"
+                                  data-bs-toggle="tooltip" data-bs-placement="bottom"
+                                  title="Instance: @instanceId | Machine: @machineName | Started: @startedAt">
+                                <i class="bi bi-server me-1" style="font-size:.75rem;"></i>@instanceId
+                            </span>
+                        </li>
+
+                        <!-- Concurrent GET — icon only -->
+                        <li class="nav-item">
+                            <a class="hcp-icon-btn @(IsActive("Cache","ConcurrentGet") ? "active" : "") hcp-icon-warning"
+                               asp-controller="Cache" asp-action="ConcurrentGet"
+                               data-bs-toggle="tooltip" data-bs-placement="bottom" title="Concurrent GET Simulator">
+                                <i class="bi bi-arrow-repeat"></i>
+                            </a>
+                        </li>
 
                         <!-- Stampede — icon only -->
                         <li class="nav-item">

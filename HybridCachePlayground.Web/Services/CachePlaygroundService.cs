@@ -106,8 +106,8 @@ public sealed class CachePlaygroundService : ICachePlaygroundService
         for (var i = 1; i <= count; i++)
         {
             var key           = $"{keyPrefix}-{i}";
-            var (label, json) = RandomDataFactory.Generate();
-            var entryTags     = new List<string>(baseTags) { NormalizeTag(label) };
+            var (label, json, _) = RandomDataFactory.Generate();
+            var entryTags        = new List<string>(baseTags) { NormalizeTag(label) };
 
             await SetAsync(key, json, entryTags, expirationMinutes, flags, ct);
 
@@ -137,10 +137,13 @@ public sealed class CachePlaygroundService : ICachePlaygroundService
         string key,
         HybridCacheEntryFlags flags = HybridCacheEntryFlags.None,
         int factoryTemplateIndex = -1,
+        IEnumerable<string>? tags = null,
+        string? factoryValue = null,
         CancellationToken ct = default)
     {
         var factoryRan = false;
         string? factoryLabel = null;
+        string[]? factoryTemplateTags = null;
 
         var options = MakeOptions(_defaultTtlMinutes, flags);
 
@@ -149,10 +152,20 @@ public sealed class CachePlaygroundService : ICachePlaygroundService
             factoryRan = true;
             Interlocked.Increment(ref _factoryInvocations);
 
-            var (label, json) = factoryTemplateIndex >= 0
+            if (!string.IsNullOrWhiteSpace(factoryValue))
+            {
+                // Use user-provided (possibly edited) value
+                factoryLabel = factoryTemplateIndex >= 0
+                    ? RandomDataFactory.Templates[factoryTemplateIndex].Label
+                    : "Custom";
+                return ValueTask.FromResult(factoryValue);
+            }
+
+            var (label, json, tTags) = factoryTemplateIndex >= 0
                 ? RandomDataFactory.GenerateFromTemplate(factoryTemplateIndex)
                 : RandomDataFactory.Generate();
             factoryLabel = label;
+            factoryTemplateTags = tTags;
 
             return ValueTask.FromResult(json);
         }, options, cancellationToken: ct);
@@ -183,21 +196,35 @@ public sealed class CachePlaygroundService : ICachePlaygroundService
                 _logger.LogInformation(
                     "Cache MISS {Key} | Factory ran | Label: {Label}", key, factoryLabel);
 
-                var autoTags = new List<string> { "factory-generated", NormalizeTag(factoryLabel ?? "unknown") };
+                // Merge: user-supplied tags take priority, fall back to template tags
+                var providedTags = tags?.Select(NormalizeTag).Where(t => t.Length > 0).ToList() ?? [];
+                var resolvedTags = providedTags.Count > 0
+                    ? providedTags
+                    : (factoryTemplateTags?.Select(NormalizeTag).ToList() ?? []);
+
+                var finalTags = new List<string>(resolvedTags);
+                if (!finalTags.Contains("factory-generated"))
+                    finalTags.Insert(0, "factory-generated");
+                if (factoryLabel is not null)
+                {
+                    var labelTag = NormalizeTag(factoryLabel);
+                    if (!finalTags.Contains(labelTag))
+                        finalTags.Add(labelTag);
+                }
 
                 _metadata[key] = new CacheEntryMetadata
                 {
                     Key = key,
                     Value = value,
-                    Tags = autoTags,
+                    Tags = finalTags,
                     CreatedAt = now,
                     ExpiresAt = now.AddMinutes(_defaultTtlMinutes),
                     FactoryGenerated = true,
                     FactoryLabel = factoryLabel
                 };
 
-                RegisterKey(key, autoTags, now);
-                RegisterTags(autoTags, key, now);
+                RegisterKey(key, finalTags, now);
+                RegisterTags(finalTags, key, now);
             }
             else if (factoryRan)
             {
@@ -250,7 +277,7 @@ public sealed class CachePlaygroundService : ICachePlaygroundService
 
                 await Task.Delay(50, innerCt);
 
-                var (_, json) = RandomDataFactory.Generate();
+                var (_, json, _) = RandomDataFactory.Generate();
                 capturedValue = json;
                 return json;
             }, cancellationToken: ct).AsTask()
@@ -318,6 +345,114 @@ public sealed class CachePlaygroundService : ICachePlaygroundService
             FactoryInvocations = localFactoryHits,
             SuccessfulResponses = successCount,
             ElapsedMs = sw.ElapsedMilliseconds,
+            SampleValue = capturedValue ?? results.FirstOrDefault(v => v is not null)
+        };
+    }
+
+    // ─── Concurrent GET test ──────────────────────────────────────────────────
+
+    public async Task<ConcurrentGetResult> RunConcurrentGetTestAsync(
+        string key, int concurrency, int factoryDelayMs, bool forceEvict, CancellationToken ct = default)
+    {
+        _logger.LogInformation(
+            "Concurrent GET TEST START | Key: {Key} | Concurrency: {Concurrency} | FactoryDelayMs: {FactoryDelayMs} | ForceEvict: {ForceEvict}",
+            key, concurrency, factoryDelayMs, forceEvict);
+
+        if (forceEvict)
+        {
+            await _cache.RemoveAsync(key, ct);
+            _metadata.TryRemove(key, out _);
+            if (_keyRegistry.TryGetValue(key, out var k)) k.IsCurrentlyActive = false;
+            _logger.LogDebug("Concurrent GET pre-evict | Key: {Key}", key);
+        }
+
+        var localFactoryHits = 0;
+        var localCacheHits = 0;
+        string? capturedValue = null;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
+        var tasks = Enumerable.Range(0, concurrency).Select(_ =>
+            _cache.GetOrCreateAsync(key, async innerCt =>
+            {
+                Interlocked.Increment(ref localFactoryHits);
+                Interlocked.Increment(ref _factoryInvocations);
+
+                await Task.Delay(factoryDelayMs, innerCt);
+
+                var (_, json, _) = RandomDataFactory.Generate();
+                capturedValue = json;
+                return json;
+            }, cancellationToken: ct).AsTask()
+        ).ToList();
+
+        var results = await Task.WhenAll(tasks);
+        sw.Stop();
+
+        var successCount = results.Count(v => v is not null);
+        // Cache hits = requests that got a value without running the factory
+        localCacheHits = successCount - Math.Min(localFactoryHits, successCount);
+        var now = DateTimeOffset.UtcNow;
+
+        if (localFactoryHits == 1)
+        {
+            _logger.LogInformation(
+                "Concurrent GET TEST PASS | Key: {Key} | Requests: {Concurrency} | FactoryRan: {FactoryRan} | CacheHits: {CacheHits} | Elapsed: {ElapsedMs}ms",
+                key, concurrency, localFactoryHits, localCacheHits, sw.ElapsedMilliseconds);
+        }
+        else if (localFactoryHits == 0)
+        {
+            localCacheHits = successCount;
+            _logger.LogInformation(
+                "Concurrent GET TEST — all HITs | Key: {Key} | Requests: {Concurrency} | Elapsed: {ElapsedMs}ms",
+                key, concurrency, sw.ElapsedMilliseconds);
+        }
+        else
+        {
+            _logger.LogWarning(
+                "Concurrent GET TEST WARN | Key: {Key} | FactoryRan {FactoryRan} times | Concurrency: {Concurrency} | Elapsed: {ElapsedMs}ms",
+                key, localFactoryHits, concurrency, sw.ElapsedMilliseconds);
+        }
+
+        if (localFactoryHits > 0 && capturedValue is not null)
+        {
+            var tags = new List<string> { "factory-generated", "concurrent-get-test" };
+
+            _metadata[key] = new CacheEntryMetadata
+            {
+                Key = key,
+                Value = capturedValue,
+                Tags = tags,
+                CreatedAt = now,
+                ExpiresAt = now.AddMinutes(_defaultTtlMinutes),
+                FactoryGenerated = true,
+                FactoryLabel = "ConcurrentGet"
+            };
+
+            RegisterKey(key, tags, now);
+            RegisterTags(tags, key, now);
+        }
+
+        if (localFactoryHits > 0)
+        {
+            Interlocked.Increment(ref _misses);
+            var coalesced = successCount - 1;
+            if (coalesced > 0) Interlocked.Add(ref _hits, coalesced);
+        }
+        else
+        {
+            Interlocked.Add(ref _hits, successCount);
+        }
+
+        return new ConcurrentGetResult
+        {
+            Key = key,
+            RequestCount = concurrency,
+            FactoryInvocations = localFactoryHits,
+            CacheHits = localCacheHits,
+            SuccessfulResponses = successCount,
+            ElapsedMs = sw.ElapsedMilliseconds,
+            FactoryDelayMs = factoryDelayMs,
+            WasEvicted = forceEvict,
             SampleValue = capturedValue ?? results.FirstOrDefault(v => v is not null)
         };
     }

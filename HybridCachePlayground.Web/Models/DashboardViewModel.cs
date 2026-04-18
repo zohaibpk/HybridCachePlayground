@@ -8,4 +8,5 @@ public class DashboardViewModel
     public List<TagRegistryEntry> TagRegistry { get; set; } = [];
     public int TotalNotifications { get; set; }
     public int UnreadNotifications { get; set; }
+    public InstanceInfo? Instance { get; set; }
 }

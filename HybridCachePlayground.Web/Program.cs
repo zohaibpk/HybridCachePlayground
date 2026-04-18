@@ -1,3 +1,4 @@
+using HybridCachePlayground.Web.Models;
 using HybridCachePlayground.Web.Services;
 using Microsoft.Extensions.Caching.Hybrid;
 using Serilog;
@@ -18,11 +19,20 @@ try
 {
     var builder = WebApplication.CreateBuilder(args);
 
+    // ─── Instance identity ────────────────────────────────────────────────────
+    var instanceInfo = new InstanceInfo(
+        Id:          builder.Configuration.GetValue("Instance:Id", "instance-1")!,
+        Color:       builder.Configuration.GetValue("Instance:Color", "#4d9ef7")!,
+        MachineName: System.Environment.MachineName,
+        StartedAt:   DateTimeOffset.UtcNow);
+    builder.Services.AddSingleton(instanceInfo);
+
     // ─── Serilog ──────────────────────────────────────────────────────────────
     builder.Host.UseSerilog((ctx, services, lc) => lc
         .ReadFrom.Configuration(ctx.Configuration)
         .ReadFrom.Services(services)
         .Enrich.FromLogContext()
+        .Enrich.WithProperty("InstanceId", instanceInfo.Id)
         // Per-startup session log — separate from the rolling daily log
         .WriteTo.File(
             startupLogPath,

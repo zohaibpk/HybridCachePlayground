@@ -15,9 +15,13 @@ public interface ICachePlaygroundService
     Task<CacheGetResult> GetOrCreateAsync(string key,
         HybridCacheEntryFlags flags = HybridCacheEntryFlags.None,
         int factoryTemplateIndex = -1,
+        IEnumerable<string>? tags = null,
+        string? factoryValue = null,
         CancellationToken ct = default);
 
     Task<StampedeResult> RunStampedeTestAsync(string key, int concurrency, bool forceEvict, CancellationToken ct = default);
+
+    Task<ConcurrentGetResult> RunConcurrentGetTestAsync(string key, int concurrency, int factoryDelayMs, bool forceEvict, CancellationToken ct = default);
 
     Task RemoveAsync(string key, CancellationToken ct = default);
 

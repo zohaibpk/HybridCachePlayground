@@ -123,7 +123,11 @@ public class CacheController : Controller
             model.Key, model.GetEntryFlags(), model.FactoryTemplateIndex);
 
         var result = await _cacheService.GetOrCreateAsync(
-            model.Key, model.GetEntryFlags(), model.FactoryTemplateIndex);
+            model.Key,
+            model.GetEntryFlags(),
+            model.FactoryTemplateIndex,
+            model.ParsedTags.Count > 0 ? model.ParsedTags : null,
+            string.IsNullOrWhiteSpace(model.FactoryValue) ? null : model.FactoryValue);
         ViewData["Result"] = result;
         InjectRecentKeys();
         return View(model);
@@ -244,17 +248,41 @@ public class CacheController : Controller
         return View(model);
     }
 
+    // ─── Concurrent GET test ─────────────────────────────────────────────────
+
+    [HttpGet]
+    public IActionResult ConcurrentGet()
+    {
+        InjectRecentKeys();
+        ViewData["StampedeMax"] = _stampedeMax;
+        return View(new ConcurrentGetRequest());
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> ConcurrentGet(ConcurrentGetRequest model)
+    {
+        ViewData["StampedeMax"] = _stampedeMax;
+        InjectRecentKeys();
+        if (model.Concurrency > _stampedeMax)
+            ModelState.AddModelError(nameof(model.Concurrency), $"Max is {_stampedeMax}.");
+        if (!ModelState.IsValid) return View(model);
+        var result = await _cacheService.RunConcurrentGetTestAsync(model.Key, model.Concurrency, model.FactoryDelayMs, model.ForceEvict);
+        ViewData["Result"] = result;
+        return View(model);
+    }
+
     // ─── Generate Value (AJAX) ────────────────────────────────────────────────
 
     [HttpGet]
     public IActionResult GenerateValue(int templateIndex = -1)
     {
-        var (label, json) = templateIndex >= 0
+        var (label, json, tags) = templateIndex >= 0
             ? RandomDataFactory.GenerateFromTemplate(templateIndex)
             : RandomDataFactory.Generate();
 
         _logger.LogDebug("GenerateValue called | Template: {Template} | Label: {Label}", templateIndex, label);
-        return Json(new { label, json, templateIndex });
+        return Json(new { label, json, tags, templateIndex });
     }
 
     // ─── Template names (AJAX) ────────────────────────────────────────────────

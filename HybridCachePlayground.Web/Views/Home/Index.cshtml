@@ -4,7 +4,14 @@
 }
 
 <div class="d-flex justify-content-between align-items-center mb-3">
-    <h2 class="mb-0">Cache Dashboard</h2>
+    <div>
+        <h2 class="mb-0">Cache Dashboard</h2>
+        <small class="text-muted">
+            <i class="bi bi-server me-1"></i>@Model.Instance?.Id
+            <span class="text-muted mx-1">·</span>
+            <i class="bi bi-pc-display me-1"></i>@Model.Instance?.MachineName
+        </small>
+    </div>
     <div class="d-flex align-items-center gap-3">
         <div class="form-check form-switch mb-0">
             <input class="form-check-input" type="checkbox" id="autoRefreshToggle" />
@@ -116,10 +123,24 @@
 }
 else
 {
+    <!-- Bulk delete toolbar -->
+    <div id="bulkToolbar" class="d-none mb-2 d-flex align-items-center gap-2">
+        <span class="small text-muted"><span id="selectedCount">0</span> selected</span>
+        <form asp-controller="Home" asp-action="BulkRemove" method="post" id="bulkRemoveForm">
+            @Html.AntiForgeryToken()
+            <input type="hidden" name="keys" id="selectedKeys" />
+            <button type="submit" class="btn btn-sm btn-outline-danger">
+                <i class="bi bi-trash3 me-1"></i>Delete Selected
+            </button>
+        </form>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="btnClearSel">Clear selection</button>
+    </div>
+
     <div class="table-responsive mb-4">
         <table class="table table-bordered table-hover align-middle mb-0">
             <thead class="table-dark">
                 <tr>
+                    <th style="width:36px"><input type="checkbox" id="selectAllKeys" class="form-check-input" /></th>
                     <th>Key</th>
                     <th>Value</th>
                     <th style="width:60px" class="text-center">Tags #</th>
@@ -135,7 +156,8 @@ else
                 @foreach (var entry in Model.Entries)
                 {
                     var collapseId = $"val-{entry.Key.GetHashCode():X}";
-                    <tr class="@(entry.IsExpired ? "expired-row" : "")">
+                    <tr class="entry-row @(entry.IsExpired ? "expired-row" : "")" data-key="@entry.Key">
+                        <td><input type="checkbox" class="form-check-input entry-cb" value="@entry.Key" /></td>
                         <td><code class="small">@entry.Key</code></td>
                         <td style="max-width:220px">
                             <div class="d-flex gap-1">
@@ -183,7 +205,11 @@ else
                                 : "—")
                         </td>
                         <td>
-                            <form asp-controller="Home" asp-action="QuickRemove" method="post">
+                            <button type="button" class="btn btn-sm btn-outline-secondary me-1 btn-inspect"
+                                    data-key="@entry.Key" title="Inspect">
+                                <i class="bi bi-zoom-in"></i>
+                            </button>
+                            <form asp-controller="Home" asp-action="QuickRemove" method="post" class="d-inline">
                                 @Html.AntiForgeryToken()
                                 <input type="hidden" name="key" value="@entry.Key" />
                                 <button type="submit" class="btn btn-sm btn-outline-danger">Remove</button>
@@ -195,6 +221,19 @@ else
         </table>
     </div>
 }
+
+<!-- Entry Inspector Offcanvas -->
+<div class="offcanvas offcanvas-end" tabindex="-1" id="entryInspector" style="width:420px;background:#161b22;border-left:1px solid #30363d;">
+    <div class="offcanvas-header border-bottom" style="border-color:#30363d!important;">
+        <h6 class="offcanvas-title fw-semibold">
+            <i class="bi bi-zoom-in me-2"></i>Entry Inspector
+        </h6>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas"></button>
+    </div>
+    <div class="offcanvas-body p-3" id="inspectorBody">
+        <div class="text-muted small text-center mt-5">Select an entry to inspect.</div>
+    </div>
+</div>
 
 <!-- ── Key Registry ──────────────────────────────────────────────────────── -->
 <h5 class="mb-2 mt-4">
@@ -344,5 +383,199 @@ document.getElementById('autoRefreshToggle').addEventListener('change', function
         refreshTimer = null;
     }
 });
+
+// ── Entry Inspector ────────────────────────────────────────────────────────
+(function () {
+    var ttlInterval = null;
+    var currentExpiresInMs = 0;
+    var fetchedAt = 0;
+
+    function escHtml(s) {
+        return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    function fmtTtl(ms) {
+        if (ms <= 0) return '<span class="text-danger">Expired</span>';
+        var s = Math.floor(ms / 1000);
+        var m = Math.floor(s / 60);
+        var h = Math.floor(m / 60);
+        if (h > 0) return h + 'h ' + (m % 60) + 'm ' + (s % 60) + 's';
+        if (m > 0) return m + 'm ' + (s % 60) + 's';
+        return s + 's';
+    }
+
+    function renderInspector(d) {
+        currentExpiresInMs = d.expiresInMs || 0;
+        fetchedAt = Date.now();
+
+        var totalHitMiss = (d.hits || 0) + (d.misses || 0);
+        var hitPct = totalHitMiss > 0 ? Math.round((d.hits / totalHitMiss) * 100) : 0;
+        var hitBarColor = hitPct >= 50 ? '#198754' : '#dc3545';
+
+        var html = '<div class="mb-3">';
+        html += '<div class="small text-muted mb-1">Key</div>';
+        html += '<code class="small" style="word-break:break-all;">' + escHtml(d.key) + '</code>';
+        html += '</div>';
+
+        // Status + TTL
+        html += '<div class="mb-3 d-flex gap-2 align-items-center">';
+        if (d.isExpired) {
+            html += '<span class="badge text-bg-danger">Expired</span>';
+        } else {
+            html += '<span class="badge text-bg-success">Active</span>';
+        }
+        if (d.factoryGenerated) {
+            html += '<span class="badge text-bg-warning">factory · ' + escHtml(d.factoryLabel) + '</span>';
+        }
+        html += '</div>';
+
+        // TTL countdown
+        html += '<div class="mb-3 p-2 rounded" style="background:#0d1117;border:1px solid #2d3139;">';
+        html += '<div class="small text-muted mb-1">TTL Remaining</div>';
+        html += '<div id="ttlCountdown" class="fw-semibold" style="font-size:1.1rem;">' + fmtTtl(currentExpiresInMs) + '</div>';
+        html += '<div class="small text-muted mt-1">Expires: ' + escHtml(d.expiresAt) + '</div>';
+        html += '</div>';
+
+        // Hit/Miss bar
+        if (totalHitMiss > 0) {
+            html += '<div class="mb-3">';
+            html += '<div class="small text-muted mb-1">Hit / Miss Ratio</div>';
+            html += '<div class="progress" style="height:8px;background:#2d3139;">';
+            html += '<div class="progress-bar" style="width:' + hitPct + '%;background:' + hitBarColor + ';" title="' + hitPct + '% hits"></div>';
+            html += '</div>';
+            html += '<div class="d-flex justify-content-between small mt-1">';
+            html += '<span class="text-success">' + d.hits + ' hits (' + hitPct + '%)</span>';
+            html += '<span class="text-danger">' + d.misses + ' misses</span>';
+            html += '</div>';
+            html += '</div>';
+        }
+
+        // Stats row
+        html += '<div class="row g-2 mb-3 text-center">';
+        html += '<div class="col-3"><div class="small text-muted">Hits</div><div class="fw-bold text-success">' + (d.hits || 0) + '</div></div>';
+        html += '<div class="col-3"><div class="small text-muted">Misses</div><div class="fw-bold text-danger">' + (d.misses || 0) + '</div></div>';
+        html += '<div class="col-3"><div class="small text-muted">Hit %</div><div class="fw-bold">' + hitPct + '%</div></div>';
+        html += '<div class="col-3"><div class="small text-muted">Set #</div><div class="fw-bold">' + (d.timesSet || 0) + '</div></div>';
+        html += '</div>';
+
+        // Tags
+        if (d.tags && d.tags.length > 0) {
+            html += '<div class="mb-3">';
+            html += '<div class="small text-muted mb-1">Tags</div>';
+            d.tags.forEach(function(t) {
+                html += '<span class="badge text-bg-info badge-tag me-1">' + escHtml(t) + '</span>';
+            });
+            html += '</div>';
+        }
+
+        // Timestamps
+        html += '<div class="mb-3 small">';
+        html += '<div class="text-muted">Created: <span class="text-light">' + escHtml(d.createdAt) + '</span></div>';
+        if (d.lastAccessedAt) {
+            html += '<div class="text-muted">Last Hit: <span class="text-light">' + escHtml(d.lastAccessedAt) + '</span></div>';
+        }
+        if (d.firstSeen) {
+            html += '<div class="text-muted">First Seen: <span class="text-light">' + escHtml(d.firstSeen) + '</span></div>';
+        }
+        html += '</div>';
+
+        // Value
+        if (d.value) {
+            html += '<div class="mb-2">';
+            html += '<div class="small text-muted mb-1">Value</div>';
+            html += '<pre class="value-preview small mb-0">' + escHtml(d.value) + '</pre>';
+            html += '</div>';
+        }
+
+        document.getElementById('inspectorBody').innerHTML = html;
+
+        // Start TTL countdown
+        if (ttlInterval) clearInterval(ttlInterval);
+        if (!d.isExpired && currentExpiresInMs > 0) {
+            ttlInterval = setInterval(function () {
+                var elapsed = Date.now() - fetchedAt;
+                var remaining = currentExpiresInMs - elapsed;
+                var el = document.getElementById('ttlCountdown');
+                if (el) el.innerHTML = fmtTtl(remaining);
+                if (remaining <= 0 && ttlInterval) {
+                    clearInterval(ttlInterval);
+                    ttlInterval = null;
+                }
+            }, 1000);
+        }
+    }
+
+    document.querySelectorAll('.btn-inspect').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var key = btn.getAttribute('data-key');
+            var offcanvasEl = document.getElementById('entryInspector');
+            bootstrap.Offcanvas.getOrCreateInstance(offcanvasEl).show();
+            document.getElementById('inspectorBody').innerHTML = '<div class="text-muted small text-center mt-5">Loading…</div>';
+            fetch('/Home/EntryDetail?key=' + encodeURIComponent(key))
+                .then(function (r) {
+                    if (!r.ok) throw new Error('Not found');
+                    return r.json();
+                })
+                .then(renderInspector)
+                .catch(function () {
+                    document.getElementById('inspectorBody').innerHTML = '<div class="text-danger small text-center mt-5">Failed to load entry.</div>';
+                });
+        });
+    });
+
+    document.getElementById('entryInspector').addEventListener('hide.bs.offcanvas', function () {
+        if (ttlInterval) { clearInterval(ttlInterval); ttlInterval = null; }
+    });
+})();
+
+// ── Bulk selection ─────────────────────────────────────────────────────────
+(function () {
+    var selectAll = document.getElementById('selectAllKeys');
+    var toolbar   = document.getElementById('bulkToolbar');
+    var countEl   = document.getElementById('selectedCount');
+    var keysInput = document.getElementById('selectedKeys');
+    var clearBtn  = document.getElementById('btnClearSel');
+
+    if (!selectAll) return; // no entries
+
+    function updateToolbar() {
+        var checked = document.querySelectorAll('.entry-cb:checked');
+        var count = checked.length;
+        countEl.textContent = count;
+        if (count > 0) {
+            toolbar.classList.remove('d-none');
+            toolbar.classList.add('d-flex');
+            keysInput.value = Array.from(checked).map(function (c) { return c.value; }).join(',');
+        } else {
+            toolbar.classList.add('d-none');
+            toolbar.classList.remove('d-flex');
+            keysInput.value = '';
+        }
+    }
+
+    selectAll.addEventListener('change', function () {
+        document.querySelectorAll('.entry-cb').forEach(function (cb) {
+            cb.checked = selectAll.checked;
+        });
+        updateToolbar();
+    });
+
+    document.querySelectorAll('.entry-cb').forEach(function (cb) {
+        cb.addEventListener('change', function () {
+            var all = document.querySelectorAll('.entry-cb');
+            var allChecked = Array.from(all).every(function (c) { return c.checked; });
+            selectAll.checked = allChecked;
+            updateToolbar();
+        });
+    });
+
+    if (clearBtn) {
+        clearBtn.addEventListener('click', function () {
+            selectAll.checked = false;
+            document.querySelectorAll('.entry-cb').forEach(function (cb) { cb.checked = false; });
+            updateToolbar();
+        });
+    }
+})();
 </script>
 }

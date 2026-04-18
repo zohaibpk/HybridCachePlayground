@@ -253,6 +253,19 @@ pre code { color: inherit; }
   margin: 0 .15rem;
 }
 
+.hcp-instance-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: .2rem .6rem;
+  border-radius: 20px;
+  font-size: .72rem;
+  font-weight: 600;
+  cursor: default;
+  border: 1px solid currentColor;
+  opacity: .85;
+}
+.hcp-instance-badge:hover { opacity: 1; }
+
 /* Notification dropdown */
 .hcp-notif-dropdown {
   min-width: 320px;
