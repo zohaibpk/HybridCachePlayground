@@ -3,7 +3,6 @@
     ViewData["Title"] = "Remove by Tag";
     var allTags = ViewData["AllTags"] as List<string> ?? new();
 
-    // Derive wildcard patterns from known tags: "factory-generated" → "factory-*", "users" → "users*"
     var wildcardPatterns = allTags
         .Select(t => t.Contains('-') ? t.Split('-')[0] + "-*" : t + "*")
         .Distinct()
@@ -21,7 +20,7 @@
     <!-- ── Left column ── -->
     <div class="col-md-7">
 
-        <!-- Exact match -->
+        <!-- Single tag exact match -->
         <div class="card mb-4">
             <div class="card-header fw-semibold">Exact Tag Match</div>
             <div class="card-body">
@@ -47,6 +46,34 @@
                         }
                     </div>
                     <button type="submit" class="btn btn-danger">Evict by Tag</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Bulk tag remove -->
+        <div class="card border-danger mb-4">
+            <div class="card-header fw-semibold">Bulk Remove Tags</div>
+            <div class="card-body">
+                <form asp-action="BulkRemoveTags" method="post">
+                    @Html.AntiForgeryToken()
+                    <div class="mb-3">
+                        <label for="tags" class="form-label fw-semibold">Tags</label>
+                        <textarea id="tags" name="tags" class="form-control font-monospace" rows="5"
+                                  placeholder="users&#10;tenant-5&#10;product&#10;&#10;or comma-separated: users, tenant-5"></textarea>
+                        <div class="form-text">One tag per line, or comma-separated. Duplicates are ignored.</div>
+                        @if (allTags.Any())
+                        {
+                            <div class="mt-2">
+                                <small class="text-muted">Add from known tags: </small>
+                                @foreach (var t in allTags)
+                                {
+                                    <button type="button" class="btn btn-sm btn-outline-danger chip-tag"
+                                            data-val="@t">@t</button>
+                                }
+                            </div>
+                        }
+                    </div>
+                    <button type="submit" class="btn btn-danger">Evict All Tags</button>
                 </form>
             </div>
         </div>
@@ -142,6 +169,16 @@
     document.querySelectorAll('[data-fill-id]').forEach(function (btn) {
         btn.addEventListener('click', function () {
             document.getElementById(btn.getAttribute('data-fill-id')).value = btn.getAttribute('data-fill-val');
+        });
+    });
+
+    document.querySelectorAll('.chip-tag').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var ta = document.getElementById('tags');
+            var val = btn.getAttribute('data-val');
+            var parts = ta.value.split(/[\n,]/).map(function(s){ return s.trim(); }).filter(Boolean);
+            if (!parts.includes(val)) parts.push(val);
+            ta.value = parts.join('\n');
         });
     });
     </script>

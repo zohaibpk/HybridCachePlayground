@@ -25,6 +25,8 @@ public interface ICachePlaygroundService
 
     Task RemoveAsync(string key, CancellationToken ct = default);
 
+    Task<BulkRemoveResult> BulkRemoveAsync(IEnumerable<string> keys, CancellationToken ct = default);
+
     Task<int> RemoveByTagAsync(string tag, CancellationToken ct = default);
 
     /// <summary>

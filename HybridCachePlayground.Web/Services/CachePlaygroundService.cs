@@ -470,6 +470,30 @@ public sealed class CachePlaygroundService : ICachePlaygroundService
             entry.IsCurrentlyActive = false;
     }
 
+    public async Task<BulkRemoveResult> BulkRemoveAsync(IEnumerable<string> keys, CancellationToken ct = default)
+    {
+        var keyList = keys.Distinct().ToList();
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
+        _logger.LogInformation("Bulk REMOVE START | Keys: {Count}", keyList.Count);
+
+        foreach (var key in keyList)
+            await RemoveAsync(key, ct);
+
+        sw.Stop();
+        _logger.LogInformation(
+            "Bulk REMOVE COMPLETE | Removed: {Count} | Elapsed: {ElapsedMs}ms",
+            keyList.Count, sw.ElapsedMilliseconds);
+
+        return new BulkRemoveResult
+        {
+            Requested = keyList.Count,
+            Removed   = keyList.Count,
+            Keys      = keyList,
+            ElapsedMs = sw.ElapsedMilliseconds
+        };
+    }
+
     public async Task<int> RemoveByTagAsync(string tag, CancellationToken ct = default)
     {
         var normalizedTag = NormalizeTag(tag);

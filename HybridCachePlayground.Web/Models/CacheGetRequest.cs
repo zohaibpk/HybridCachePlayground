@@ -15,9 +15,9 @@ public class CacheGetRequest
     public string? FactoryValue { get; set; }
 
     /// <summary>Comma-separated tags to attach when the factory stores the value on miss.</summary>
-    public string TagsRaw { get; set; } = string.Empty;
+    public string? TagsRaw { get; set; }
 
-    public List<string> ParsedTags => TagsRaw
+    public List<string> ParsedTags => (TagsRaw ?? "")
         .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
         .Distinct()
         .ToList();

@@ -63,7 +63,7 @@
             <!-- Tags -->
             <div class="mb-3">
                 <label asp-for="Tags" class="form-label fw-semibold">
-                    Tags <span class="text-muted fw-normal">(comma-separated)</span>
+                    Tags <span class="text-muted fw-normal">(comma-separated, optional)</span>
                 </label>
                 <input asp-for="Tags" id="Tags" class="form-control" placeholder="e.g. users, tenant-1, admin" />
                 <div class="form-text">
@@ -84,8 +84,10 @@
 
             <!-- Expiration -->
             <div class="mb-3">
-                <label asp-for="ExpirationMinutes" class="form-label fw-semibold">Expiration (minutes)</label>
-                <input asp-for="ExpirationMinutes" type="number" class="form-control" min="1" max="1440" />
+                <label asp-for="ExpirationMinutes" class="form-label fw-semibold">
+                    Expiration (minutes) <span class="text-muted fw-normal">(optional, defaults to 5 min)</span>
+                </label>
+                <input asp-for="ExpirationMinutes" type="number" class="form-control" min="1" max="1440" placeholder="5" />
                 <span asp-validation-for="ExpirationMinutes" class="text-danger small"></span>
                 <div class="form-text">L1 (local) TTL = min(this, 2 min). L2 TTL = this value.</div>
             </div>

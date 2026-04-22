@@ -16,7 +16,7 @@ public class CacheSetRequest
     public string? Tags { get; set; }
 
     [Range(1, 1440, ErrorMessage = "Expiration must be between 1 and 1440 minutes")]
-    public int ExpirationMinutes { get; set; } = 5;
+    public int? ExpirationMinutes { get; set; }
 
     // ── HybridCacheEntryFlags (write-side only for SetAsync) ─────────────────
     public bool DisableLocalCacheWrite       { get; set; }

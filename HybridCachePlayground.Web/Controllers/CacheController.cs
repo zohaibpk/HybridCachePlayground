@@ -73,7 +73,7 @@ public class CacheController : Controller
     {
         InjectRecentKeys();
         InjectAllTags();
-        return View(new CacheSetRequest { ExpirationMinutes = 5 });
+        return View(new CacheSetRequest());
     }
 
     [HttpPost]
@@ -92,7 +92,7 @@ public class CacheController : Controller
             model.Key, string.Join(", ", model.ParsedTags), model.ExpirationMinutes, model.GetEntryFlags());
 
         await _cacheService.SetAsync(
-            model.Key, model.Value, model.ParsedTags, model.ExpirationMinutes, model.GetEntryFlags());
+            model.Key, model.Value, model.ParsedTags, model.ExpirationMinutes ?? 5, model.GetEntryFlags());
 
         TempData["Message"] = $"Entry '{model.Key}' stored successfully with {model.ParsedTags.Count} tag(s).";
         TempData["MessageType"] = "success";
@@ -158,6 +158,24 @@ public class CacheController : Controller
         return RedirectToAction(nameof(Remove));
     }
 
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> BulkRemoveKeys(string keys)
+    {
+        var keyList = (keys ?? "")
+            .Split([',', '\n', '\r'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct()
+            .ToList();
+
+        _logger.LogInformation("Bulk Remove Keys | Count: {Count}", keyList.Count);
+
+        await _cacheService.BulkRemoveAsync(keyList);
+
+        TempData["Message"] = $"Removed {keyList.Count} key(s) from cache.";
+        TempData["MessageType"] = keyList.Count > 0 ? "success" : "warning";
+        return RedirectToAction(nameof(Remove));
+    }
+
     // ─── Remove by tag ───────────────────────────────────────────────────────
 
     [HttpGet]
@@ -180,6 +198,26 @@ public class CacheController : Controller
 
         TempData["Message"] = $"Removed {count} tracked entry/entries with tag '{model.Tag}'.";
         TempData["MessageType"] = count > 0 ? "success" : "warning";
+        return RedirectToAction(nameof(RemoveByTag));
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> BulkRemoveTags(string tags)
+    {
+        var tagList = (tags ?? "")
+            .Split([',', '\n', '\r'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct()
+            .ToList();
+
+        _logger.LogInformation("Bulk Remove Tags | Count: {Count}", tagList.Count);
+
+        var totalEntries = 0;
+        foreach (var tag in tagList)
+            totalEntries += await _cacheService.RemoveByTagAsync(tag);
+
+        TempData["Message"] = $"Removed entries for {tagList.Count} tag(s) — {totalEntries} entries evicted.";
+        TempData["MessageType"] = totalEntries > 0 ? "success" : "warning";
         return RedirectToAction(nameof(RemoveByTag));
     }
 
